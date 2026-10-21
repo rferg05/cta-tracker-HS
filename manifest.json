@@ -1,0 +1,164 @@
+{
+  "id": "cta-tracker",
+  "name": "CTA Tracker",
+  "version": "1.1.0",
+  "description": "Live map of CTA trains and buses around one stop, with the next arrivals in each direction.",
+  "author": "Ryan",
+  "license": "MIT",
+  "minAppVersion": "1.7.1",
+  "moduleType": "cta-tracker",
+  "category": "Travel",
+  "icon": "TrainFront",
+  "defaultConfig": {
+    "layout": "auto",
+    "radiusMiles": 1.5,
+    "refreshSeconds": 30,
+    "positionSeconds": 10,
+    "busRoutes": "56,70,9",
+    "trainStation": "40320",
+    "centerLat": 41.903355,
+    "centerLon": -87.666496,
+    "centerLabel": "Division",
+    "arrivalsPerDirection": 3,
+    "timeFormat": "minutes",
+    "showPassed": true,
+    "showStreets": true
+  },
+  "defaultSize": {
+    "w": 960,
+    "h": 540
+  },
+  "defaultStyle": {
+    "fontSize": 16,
+    "padding": 12,
+    "backgroundColor": "rgba(0, 0, 0, 0.55)"
+  },
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "layout": {
+        "type": "string",
+        "title": "Layout",
+        "enum": ["auto", "side", "stacked", "map"],
+        "enumLabels": ["Auto (by module shape)", "Map left, arrivals right", "Map above arrivals", "Map only"],
+        "ui:widget": "select",
+        "ui:group": "Layout"
+      },
+      "radiusMiles": {
+        "type": "number",
+        "title": "Map radius (miles)",
+        "description": "Distance from the center to the nearest edge of the map.",
+        "minimum": 0.5,
+        "maximum": 5,
+        "ui:widget": "slider",
+        "ui:step": 0.25,
+        "ui:group": "Layout"
+      },
+      "arrivalsPerDirection": {
+        "type": "number",
+        "title": "Arrivals per direction",
+        "minimum": 1,
+        "maximum": 5,
+        "ui:widget": "slider",
+        "ui:step": 1,
+        "ui:group": "Layout"
+      },
+      "timeFormat": {
+        "type": "string",
+        "title": "Arrival times",
+        "enum": ["minutes", "clock", "both"],
+        "enumLabels": ["Minutes away", "Clock time", "Both"],
+        "ui:widget": "select",
+        "ui:group": "Layout"
+      },
+      "showPassed": {
+        "type": "boolean",
+        "title": "Show vehicles that already passed",
+        "description": "Drawn faded. Off hides them entirely.",
+        "ui:widget": "toggle",
+        "ui:group": "Layout"
+      },
+      "showStreets": {
+        "type": "boolean",
+        "title": "Show major streets",
+        "ui:widget": "toggle",
+        "ui:group": "Layout"
+      },
+      "busRoutes": {
+        "type": "string",
+        "title": "Bus routes",
+        "description": "Comma-separated route numbers, up to 10. The stop nearest the center is used for each direction.",
+        "ui:widget": "text",
+        "ui:group": "Stops"
+      },
+      "trainStation": {
+        "type": "string",
+        "title": "Blue Line station ID",
+        "description": "Train Tracker map ID. Division is 40320.",
+        "ui:widget": "text",
+        "ui:group": "Stops"
+      },
+      "centerLat": {
+        "type": "number",
+        "title": "Center latitude",
+        "ui:widget": "text",
+        "ui:group": "Stops"
+      },
+      "centerLon": {
+        "type": "number",
+        "title": "Center longitude",
+        "ui:widget": "text",
+        "ui:group": "Stops"
+      },
+      "centerLabel": {
+        "type": "string",
+        "title": "Center label",
+        "ui:widget": "text",
+        "ui:group": "Stops"
+      },
+      "positionSeconds": {
+        "type": "number",
+        "title": "Check vehicle positions every (seconds)",
+        "description": "CTA publishes new bus positions about every 30 s. Markers glide between updates either way; checking more often shows each new position sooner.",
+        "minimum": 10,
+        "maximum": 60,
+        "ui:widget": "slider",
+        "ui:step": 5,
+        "ui:group": "Data"
+      },
+      "refreshSeconds": {
+        "type": "number",
+        "title": "Check arrival times every (seconds)",
+        "minimum": 15,
+        "maximum": 120,
+        "ui:widget": "slider",
+        "ui:step": 5,
+        "ui:group": "Data"
+      }
+    }
+  },
+  "secrets": [
+    {
+      "key": "train_key",
+      "label": "Train Tracker API key",
+      "description": "From transitchicago.com/developers/traintrackerapply.",
+      "required": true
+    },
+    {
+      "key": "bus_key",
+      "label": "Bus Tracker API key",
+      "description": "From ctabustracker.com > Developer API.",
+      "required": true
+    }
+  ],
+  "allowedDomains": [
+    "lapi.transitchicago.com",
+    "www.ctabustracker.com"
+  ],
+  "exports": {
+    "component": "default"
+  },
+  "dataRequirements": [],
+  "prefetchUrl": null,
+  "permissions": ["network", "secrets"]
+}
