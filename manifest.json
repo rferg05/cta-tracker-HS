@@ -1,7 +1,7 @@
 {
   "id": "cta-tracker",
   "name": "CTA Tracker",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "description": "Live map of CTA trains and buses around one stop, with the next arrivals in each direction.",
   "author": "Ryan",
   "license": "MIT",
@@ -11,7 +11,8 @@
   "icon": "TrainFront",
   "defaultConfig": {
     "layout": "auto",
-    "radiusMiles": 1.5,
+    "milesNorth": 1,
+    "milesSouth": 1.25,
     "refreshSeconds": 30,
     "positionSeconds": 10,
     "busRoutes": "56,70,9",
@@ -23,6 +24,7 @@
     "timeFormat": "minutes",
     "showPassed": true,
     "showStreets": true,
+    "showLegend": true,
     "nearStops": 4,
     "highlightRoutes": "56",
     "iconStyle": "car"
@@ -47,11 +49,21 @@
         "ui:widget": "select",
         "ui:group": "Layout"
       },
-      "radiusMiles": {
+      "milesNorth": {
         "type": "number",
-        "title": "Map radius (miles)",
-        "description": "Distance from the center to the nearest edge of the map.",
-        "minimum": 0.5,
+        "title": "Map reaches north (miles)",
+        "description": "From the center to the top edge. 1 mile from Division is Armitage. The map's height fits north + south; its width shows whatever fits at that scale.",
+        "minimum": 0.25,
+        "maximum": 5,
+        "ui:widget": "slider",
+        "ui:step": 0.25,
+        "ui:group": "Layout"
+      },
+      "milesSouth": {
+        "type": "number",
+        "title": "Map reaches south (miles)",
+        "description": "From the center to the bottom edge. 1.25 miles from Division is Lake.",
+        "minimum": 0.25,
         "maximum": 5,
         "ui:widget": "slider",
         "ui:step": 0.25,
@@ -84,6 +96,13 @@
       "showStreets": {
         "type": "boolean",
         "title": "Show major streets",
+        "ui:widget": "toggle",
+        "ui:group": "Layout"
+      },
+      "showLegend": {
+        "type": "boolean",
+        "title": "Show legend and update time",
+        "description": "The line under the arrivals explaining solid, dashed and bright. Off frees the space for the map and board; errors and an out-of-date warning still show when they happen.",
         "ui:widget": "toggle",
         "ui:group": "Layout"
       },

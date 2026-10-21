@@ -46,7 +46,7 @@ Drawn positions update once a second and the browser animates between them, so m
 | Bus routes | `56,70,9` | For each route and direction, the stop nearest the center is used, taken from Bus Tracker's route patterns. |
 | Blue Line station ID | `40320` (Division) | Train Tracker map ID. The track drawing only covers the Blue Line. |
 | Center lat / lon / label | Division station | Moving it re-picks the bus stops. Keep it within about 5 miles of Division so the Blue Line track still draws. |
-| Map radius | 1.5 mi | About 10 minutes of bus travel and 4 of train. |
+| Map reaches north / south | 1 mi / 1.25 mi | Armitage to Lake around Division. The map's height fits this span and its width shows whatever fits at that scale. |
 | Vehicle icons | Train as a rail car, buses round | Or round badges for both, or square trains. |
 | Emphasize buses within | 4 stops | 0 turns it off. |
 | Highlight approach stops for routes | `56` | Comma-separated, e.g. `56,70`. |
@@ -74,7 +74,7 @@ npm run preview      # module against a mock CTA feed at http://localhost:5174
 npm run build        # dist/bundle.js
 ```
 
-The preview accepts query parameters for size and any config key, e.g. `?w=520&h=800&layout=stacked&radiusMiles=2`. `fs=24` sets the text size, and `scene=overlap` parks a train and a 56 bus at Division together.
+The preview accepts query parameters for size and any config key, e.g. `?w=520&h=800&layout=stacked&milesNorth=2`. `fs=24` sets the text size, and `scene=overlap` parks a train and a 56 bus at Division together.
 
 Release tarball:
 

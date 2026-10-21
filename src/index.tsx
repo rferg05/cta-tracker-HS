@@ -10,6 +10,7 @@ import {
 } from './cta';
 import type { Arrival, ArrivalData, FetchJson, LiveRequest, Pattern, PositionData, Vehicle } from './cta';
 import { approachZone, busPdistNow, positionNow, stopsToCenter, withObservedSpeed } from './motion';
+import { useFitFontSize } from './fit';
 
 const PLUGIN_ID = 'cta-tracker';
 
@@ -40,7 +41,9 @@ const MOTION_TICK_MS = 1000;
 
 interface Config {
   layout: 'auto' | 'side' | 'stacked' | 'map';
-  radiusMiles: number;
+  /** Map reaches this far north / south of the center (miles). */
+  milesNorth: number;
+  milesSouth: number;
   /** Arrival predictions. */
   refreshSeconds: number;
   /** Vehicle positions. */
@@ -54,6 +57,8 @@ interface Config {
   timeFormat: 'minutes' | 'clock' | 'both';
   showPassed: boolean;
   showStreets: boolean;
+  /** The update time and solid/dashed/bright key under the board. */
+  showLegend: boolean;
   /** A bus this many stops or fewer from the center is emphasized; 0 = off. */
   nearStops: number;
   /** Routes whose approach zone (the last `nearStops` stops) is drawn. */
@@ -66,11 +71,16 @@ function readConfig(raw: Record<string, unknown>): Config {
     const x = typeof v === 'number' ? v : parseFloat(String(v));
     return Number.isFinite(x) ? Math.min(hi, Math.max(lo, x)) : d;
   };
+  // Toggles default on; off is `false` or the string "false".
+  const on = (v: unknown) => v !== false && v !== 'false';
   const pick = <T extends string>(v: unknown, opts: T[], d: T): T =>
     opts.includes(v as T) ? (v as T) : d;
   return {
     layout: pick(raw.layout, ['auto', 'side', 'stacked', 'map'], 'auto'),
-    radiusMiles: n(raw.radiusMiles, 1.5, 0.25, 10),
+    // Defaults frame the 9 from Armitage (2000 N) to Lake (200 N) around
+    // Division (1200 N): 800 and 1,000 address numbers at 800 to the mile.
+    milesNorth: n(raw.milesNorth, 1, 0.25, 6),
+    milesSouth: n(raw.milesSouth, 1.25, 0.25, 6),
     refreshSeconds: n(raw.refreshSeconds, 30, 15, 300),
     positionSeconds: n(raw.positionSeconds, 10, 10, 60),
     busRoutes: typeof raw.busRoutes === 'string' ? raw.busRoutes : '56,70,9',
@@ -80,8 +90,9 @@ function readConfig(raw: Record<string, unknown>): Config {
     centerLabel: typeof raw.centerLabel === 'string' ? raw.centerLabel : 'Division',
     arrivalsPerDirection: Math.round(n(raw.arrivalsPerDirection, 3, 1, 5)),
     timeFormat: pick(raw.timeFormat, ['minutes', 'clock', 'both'], 'minutes'),
-    showPassed: raw.showPassed !== false,
-    showStreets: raw.showStreets !== false,
+    showPassed: on(raw.showPassed),
+    showStreets: on(raw.showStreets),
+    showLegend: on(raw.showLegend),
     nearStops: Math.round(n(raw.nearStops, 4, 0, 10)),
     highlightRoutes: parseRoutes(typeof raw.highlightRoutes === 'string' ? raw.highlightRoutes : '56'),
     iconStyle: pick(raw.iconStyle, ['badge', 'car', 'tile'], 'car'),
@@ -396,16 +407,34 @@ interface Projection {
   x: (p: LatLon) => number;
   y: (p: LatLon) => number;
   inView: (p: LatLon, margin?: number) => boolean;
+  /** Where the center stop lands; not the middle of the view when the
+   *  north and south limits differ. */
+  cx: number;
+  cy: number;
+  pxPerMile: number;
 }
 
-function makeProjection(center: LatLon, radius: number, w: number, h: number): Projection {
-  const pxPerMile = Math.min(w, h) / 2 / radius;
+/** Room past each limit, so the limit's street line and label still show. */
+const EDGE_PAD_MILES = 0.08;
+
+/** North-up map whose height spans `north` miles above the center to
+ *  `south` miles below it. Width shows whatever fits at that scale, but never
+ *  less than the larger limit on each side, so a narrow map doesn't crop
+ *  sideways to a sliver; it shows extra north-south instead. */
+function makeProjection(center: LatLon, north: number, south: number, w: number, h: number): Projection {
+  const span = north + south + EDGE_PAD_MILES * 2;
+  const halfWidthMin = Math.max(north, south) + EDGE_PAD_MILES;
+  const pxPerMile = Math.min(h / span, w / 2 / halfWidthMin);
+  // Center the framed span vertically if the width set the scale.
+  const top = (h - span * pxPerMile) / 2;
+  const cx = w / 2;
+  const cy = top + (north + EDGE_PAD_MILES) * pxPerMile;
   const ky = 69.05 * pxPerMile;
   const kx = ky * Math.cos((center[0] * Math.PI) / 180);
-  const x = (p: LatLon) => w / 2 + (p[1] - center[1]) * kx;
-  const y = (p: LatLon) => h / 2 - (p[0] - center[0]) * ky;
+  const x = (p: LatLon) => cx + (p[1] - center[1]) * kx;
+  const y = (p: LatLon) => cy - (p[0] - center[0]) * ky;
   return {
-    x, y,
+    x, y, cx, cy, pxPerMile,
     inView: (p, margin = VIEW_MARGIN) => {
       const dx = Math.abs(x(p) - w / 2);
       const dy = Math.abs(y(p) - h / 2);
@@ -490,7 +519,8 @@ interface MapProps {
   fontPx: number;
   center: LatLon;
   centerLabel: string;
-  radius: number;
+  north: number;
+  south: number;
   routes: string[];
   patterns: Pattern[];
   vehicles: Vehicle[];
@@ -507,8 +537,8 @@ interface MapProps {
 }
 
 function TransitMap(props: MapProps) {
-  const { w, h, fontPx, center, radius, routes, patterns, vehicles, arrivals, now, nearStops } = props;
-  const proj = useMemo(() => makeProjection(center, radius, w, h), [center[0], center[1], radius, w, h]);
+  const { w, h, fontPx, center, north, south, routes, patterns, vehicles, arrivals, now, nearStops } = props;
+  const proj = useMemo(() => makeProjection(center, north, south, w, h), [center[0], center[1], north, south, w, h]);
 
   const routePaths = useMemo(() => {
     // Both directions of a route trace the same street; draw each once.
@@ -631,14 +661,13 @@ function TransitMap(props: MapProps) {
   const labelW = (props.centerLabel.length * 0.62 + 0.3) * fontPx * 0.85;
   placeTags(placed, small, [
     // The center stop and its label
-    { x0: w / 2 - fontPx * 0.5, y0: h / 2 - fontPx * 0.5, x1: w / 2 + fontPx * 0.5, y1: h / 2 + fontPx * 0.5 },
-    { x0: w / 2 + fontPx * 0.9, y0: h / 2 - fontPx * 1.7, x1: w / 2 + fontPx * 0.9 + labelW, y1: h / 2 - fontPx * 0.6 },
+    { x0: proj.cx - fontPx * 0.5, y0: proj.cy - fontPx * 0.5, x1: proj.cx + fontPx * 0.5, y1: proj.cy + fontPx * 0.5 },
+    { x0: proj.cx + fontPx * 0.9, y0: proj.cy - fontPx * 1.7, x1: proj.cx + fontPx * 0.9 + labelW, y1: proj.cy - fontPx * 0.6 },
   ], { x0: 0, y0: 0, x1: w, y1: h });
 
-  const cx = w / 2;
-  const cy = h / 2;
-  const scaleMiles = radius >= 2 ? 1 : 0.5;
-  const scalePx = (Math.min(w, h) / 2 / radius) * scaleMiles;
+  const { cx, cy } = proj;
+  const scaleMiles = north + south >= 4 ? 1 : 0.5;
+  const scalePx = proj.pxPerMile * scaleMiles;
 
   return (
     <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ display: 'block' }}>
@@ -916,12 +945,17 @@ function ArrivalChip(props: {
 function Board(props: {
   rows: Row[]; now: number; fmt: Config['timeFormat']; vehicleIds: Set<string>;
   busStops: Map<string, number>; nearStops: number;
+  /** Spread the rows down the full height instead of stacking them at the top. */
+  spread?: boolean;
   footer: React.ReactNode;
 }) {
   const { rows, now } = props;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35em', minWidth: 0, height: '100%' }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35em', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+      <div data-fit style={{
+        display: 'flex', flexDirection: 'column', gap: '0.35em', flex: 1, minHeight: 0, overflow: 'hidden',
+        justifyContent: props.spread ? 'space-evenly' : undefined,
+      }}>
         {rows.map((r) => (
           <div key={r.key} style={{ display: 'flex', alignItems: 'center', gap: '0.5em' }}>
             <div style={{
@@ -1018,26 +1052,39 @@ export default function CtaTracker(props: PluginComponentProps) {
   const posAge = positions.data ? now - positions.data.fetchedAt : 0;
   const stale = (data && age > refreshMs * 3) || (positions.data && posAge > positionMs * 3);
 
-  const footer = (
+  const status = !data ? 'Loading…' : stale
+    ? `Last update ${Math.max(1, Math.round(Math.max(age, posAge) / 60000))} min ago`
+    : `Updated ${clock(data.fetchedAt)}`;
+  // With the legend off, only what needs attention is left: errors, a stale
+  // feed, or the first load. Nothing at all when everything is fine, so the
+  // rest of the module gets the space.
+  const showStatus = cfg.showLegend || !data || stale;
+  const footer = errors.length > 0 || showStatus ? (
     <div style={{ fontSize: '0.72em', opacity: 0.75, display: 'flex', flexDirection: 'column', gap: '0.15em' }}>
       {errors.length > 0 && (
         <div style={{ color: '#FCA5A5', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {errors[0]}{errors.length > 1 ? ` (+${errors.length - 1} more)` : ''}
         </div>
       )}
-      <div style={{ display: 'flex', gap: '0.8em', flexWrap: 'wrap' }}>
-        <span style={{ color: stale ? '#FBBF24' : undefined }}>
-          {!data ? 'Loading…' : stale
-            ? `Last update ${Math.max(1, Math.round(Math.max(age, posAge) / 60000))} min ago`
-            : `Updated ${clock(data.fetchedAt)}`}
-        </span>
-        <span>Solid: tracked vehicle</span>
-        <span>Dashed: schedule only</span>
-        {cfg.nearStops > 0 && cfg.highlightRoutes.length > 0 && (
-          <span>Bright: last {cfg.nearStops} stops before {cfg.centerLabel || 'the stop'}</span>
-        )}
-      </div>
+      {showStatus && (
+        <div style={{ display: 'flex', gap: '0.8em', flexWrap: 'wrap' }}>
+          <span style={{ color: stale ? '#FBBF24' : undefined }}>{status}</span>
+          {cfg.showLegend && <span>Solid: tracked vehicle</span>}
+          {cfg.showLegend && <span>Dashed: schedule only</span>}
+          {cfg.showLegend && cfg.nearStops > 0 && cfg.highlightRoutes.length > 0 && (
+            <span>Bright: last {cfg.nearStops} stops before {cfg.centerLabel || 'the stop'}</span>
+          )}
+        </div>
+      )}
     </div>
+  ) : null;
+
+  // Beside the map the board has a column of fixed height. Fit its text to
+  // that column: it only ever shrinks to stop an overflow, except with the
+  // legend off, where it may also grow (up to a third) into the freed space.
+  const boardFit = useFitFontSize(
+    fontPx * (layout === 'side' && !cfg.showLegend ? 1.35 : 1),
+    `${layout}|${rows.map((r) => `${r.key}:${r.arrivals.length}`).join(',')}|${footer ? errors.length : 'none'}`,
   );
 
   const map = (
@@ -1045,7 +1092,7 @@ export default function CtaTracker(props: PluginComponentProps) {
       {mapSize.w > 0 && mapSize.h > 0 && (
         <TransitMap
           w={mapSize.w} h={mapSize.h} fontPx={fontPx}
-          center={center} centerLabel={cfg.centerLabel} radius={cfg.radiusMiles}
+          center={center} centerLabel={cfg.centerLabel} north={cfg.milesNorth} south={cfg.milesSouth}
           routes={routes} patterns={patternList}
           vehicles={vehicles} arrivals={data?.arrivals ?? []} now={now}
           showPassed={cfg.showPassed} showStreets={cfg.showStreets} timeFormat={cfg.timeFormat}
@@ -1071,12 +1118,20 @@ export default function CtaTracker(props: PluginComponentProps) {
     >
       {map}
       {layout !== 'map' && (
-        <div style={layout === 'side'
-          ? { flex: '1 1 0', minWidth: '17em', minHeight: 0 }
-          : { flex: '0 0 auto', minHeight: 0 }}>
-          <Board rows={rows} now={now} fmt={cfg.timeFormat} vehicleIds={vehicleIds}
-            busStops={busStops} nearStops={cfg.nearStops} footer={footer} />
-        </div>
+        layout === 'side' ? (
+          <div ref={boardFit.boxRef} style={{
+            flex: '1 1 0', minWidth: '17em', minHeight: 0, height: '100%', overflow: 'hidden',
+            fontSize: boardFit.fontSize,
+          }}>
+            <Board rows={rows} now={now} fmt={cfg.timeFormat} vehicleIds={vehicleIds}
+              busStops={busStops} nearStops={cfg.nearStops} footer={footer} spread={!cfg.showLegend} />
+          </div>
+        ) : (
+          <div style={{ flex: '0 0 auto', minHeight: 0 }}>
+            <Board rows={rows} now={now} fmt={cfg.timeFormat} vehicleIds={vehicleIds}
+              busStops={busStops} nearStops={cfg.nearStops} footer={footer} />
+          </div>
+        )
       )}
     </div>
   );
