@@ -118,7 +118,9 @@ const fetchJson: FetchJson = async (url, secret, cacheTtlMs) => {
   let json: unknown;
   try { json = JSON.parse(text); } catch { throw new Error(`HTTP ${res.status}`); }
   if (!res.ok) {
-    const err = String((json as { error?: string })?.error ?? `HTTP ${res.status}`);
+    // The proxy puts the real reason in `detail`, under a generic `error`.
+    const body = json as { error?: string; detail?: string } | null;
+    const err = body?.detail || body?.error || `HTTP ${res.status}`;
     if (/not configured/i.test(err)) {
       throw new Error(`${secret === 'train_key' ? 'Train' : 'Bus'} Tracker key not set (Plugin Store > Installed > CTA Tracker)`);
     }
@@ -127,30 +129,59 @@ const fetchJson: FetchJson = async (url, secret, cacheTtlMs) => {
   return json;
 };
 
-function cacheGet<T>(key: string): T | undefined {
-  try { return window.__HS_SDK__?.displayCache?.get(key) as T | undefined; } catch { return undefined; }
+/** How long the host keeps what we stash in its display cache. Long enough
+ *  to cover screen rotation and editor remounts; fresh data replaces it
+ *  within one poll either way. */
+const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+
+/** Read back something we cached, or undefined.
+ *
+ *  The host's `displayCache.get` returns an envelope, `{ data, stale,
+ *  fetchedAt }`, not the stored value (1.2.0 missed this and crashed on any
+ *  second mount). An older host or a test double may hand back the bare
+ *  value, so both are accepted, and `valid` checks the shape either way: a
+ *  bad entry means a fresh load, never a crash. */
+function cacheGet<T>(key: string, valid: (v: unknown) => v is T): T | undefined {
+  try {
+    const hit = window.__HS_SDK__?.displayCache?.get(key) as unknown;
+    if (hit && typeof hit === 'object' && 'data' in hit && 'stale' in hit) {
+      const data = (hit as { data: unknown }).data;
+      return valid(data) ? data : undefined;
+    }
+    return valid(hit) ? hit : undefined;
+  } catch {
+    return undefined;
+  }
 }
 function cacheSet(key: string, value: unknown): void {
-  try { window.__HS_SDK__?.displayCache?.set(key, value); } catch { /* preview without host */ }
+  try { window.__HS_SDK__?.displayCache?.set(key, value, CACHE_TTL_MS); } catch { /* preview without host */ }
 }
+
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object';
+const isPatternState = (v: unknown): v is PatternState =>
+  isObj(v) && Array.isArray(v.patterns) && Array.isArray(v.errors) && typeof v.at === 'number';
+const isPositionData = (v: unknown): v is PositionData =>
+  isObj(v) && Array.isArray(v.vehicles) && Array.isArray(v.errors) && typeof v.fetchedAt === 'number';
+const isArrivalData = (v: unknown): v is ArrivalData =>
+  isObj(v) && Array.isArray(v.arrivals) && Array.isArray(v.errors) && typeof v.fetchedAt === 'number';
 
 interface PatternState { patterns: Pattern[]; errors: string[]; at: number }
 
 function usePatterns(routes: string[], center: LatLon): PatternState | null {
   const key = `${PLUGIN_ID}:patterns:${routes.join(',')}:${center.join(',')}`;
-  const [state, setState] = useState<PatternState | null>(() => cacheGet<PatternState>(key) ?? null);
+  const [state, setState] = useState<PatternState | null>(() => cacheGet(key, isPatternState) ?? null);
 
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const cached = cacheGet<PatternState>(key);
+    const cached = cacheGet(key, isPatternState);
     setState(cached ?? null);
 
     const run = async () => {
       const result = await loadPatterns(fetchJson, routes, center);
       if (cancelled) return;
       // Keep the last good geometry through a failed refresh.
-      const prev = cacheGet<PatternState>(key);
+      const prev = cacheGet(key, isPatternState);
       const next = result.patterns.length || !prev
         ? { ...result, at: Date.now() }
         : { ...prev, errors: result.errors };
@@ -176,8 +207,9 @@ function usePoll<T>(
   req: LiveRequest | null,
   intervalMs: number,
   load: (req: LiveRequest) => Promise<T>,
+  valid: (v: unknown) => v is T,
 ): { data: T | null; error: string | null } {
-  const [data, setData] = useState<T | null>(() => cacheGet<T>(key) ?? null);
+  const [data, setData] = useState<T | null>(() => cacheGet(key, valid) ?? null);
   const [error, setError] = useState<string | null>(null);
   const loadRef = useRef(load);
   loadRef.current = load;
@@ -234,8 +266,10 @@ function useLive(
   const positions = usePoll<PositionData>(`${base}:positions`, posReq, positionMs, async (req) => {
     const p = await loadPositions(fetchJson, req);
     return { ...p, vehicles: withObservedSpeed(p.vehicles, history.current) };
-  });
-  const arrivals = usePoll<ArrivalData>(`${base}:arrivals`, arrReq, arrivalsMs, (req) => loadArrivals(fetchJson, req));
+  }, isPositionData);
+  const arrivals = usePoll<ArrivalData>(
+    `${base}:arrivals`, arrReq, arrivalsMs, (req) => loadArrivals(fetchJson, req), isArrivalData,
+  );
   return { positions, arrivals };
 }
 

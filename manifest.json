@@ -1,7 +1,7 @@
 {
   "id": "cta-tracker",
   "name": "CTA Tracker",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Live map of CTA trains and buses around one stop, with the next arrivals in each direction.",
   "author": "Ryan",
   "license": "MIT",

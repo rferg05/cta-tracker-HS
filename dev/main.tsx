@@ -3,13 +3,13 @@ import { createRoot } from 'react-dom/client';
 import manifest from '../manifest.json';
 import CtaTracker from '../src/index';
 import { mockPluginFetch } from './mock';
+import { makeHostDisplayCache } from './host-cache';
 
 // Stand-in for the host: just enough SDK for the module to run.
-const cache = new Map<string, unknown>();
 (window as unknown as { React: typeof React }).React = React;
 (window as unknown as { __HS_SDK__: unknown }).__HS_SDK__ = {
   pluginFetch: mockPluginFetch,
-  displayCache: { get: (k: string) => cache.get(k), set: (k: string, v: unknown) => cache.set(k, v), prefetch: async () => {} },
+  displayCache: makeHostDisplayCache(),
 };
 
 const style = {

@@ -138,8 +138,11 @@ declare global {
       // ── Display Cache ──
       /** In-memory cache for data between renders and screen transitions */
       displayCache: {
-        get: (key: string) => unknown;
-        set: (key: string, value: unknown) => void;
+        /** Not the stored value: an envelope around it, or null on a miss
+         *  (host src/lib/display-cache.ts). */
+        get: <T = unknown>(key: string) => { data: T; stale: boolean; fetchedAt: number } | null;
+        /** `ttlMs` is required: an entry without one counts as expired. */
+        set: (key: string, value: unknown, ttlMs: number) => void;
         prefetch: (keys: string[]) => Promise<void>;
       };
 

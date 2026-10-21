@@ -495,7 +495,7 @@ export async function loadArrivals(fetchJson: FetchJson, req: LiveRequest): Prom
  *  there, and none that passed do. Buses on a pattern we haven't loaded (a
  *  new detour) fall back to the same test. Returns new objects. */
 export function classify(vehicles: Vehicle[], arr: ArrivalData | null): Vehicle[] {
-  if (!arr) return vehicles;
+  if (!arr || !Array.isArray(arr.arrivals)) return vehicles;
   const predicted = new Map<string, Arrival>();
   for (const a of arr.arrivals) predicted.set(`${a.kind}:${a.vehicleId}`, a);
   return vehicles.map((v) => {
