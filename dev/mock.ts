@@ -81,6 +81,9 @@ const PATTERNS: MockPattern[] = [
   pattern(902, '9', 'Southbound', [...ASHLAND].reverse(), 'Ashland'),
 ];
 
+/** `?scene=overlap`: also park a train and a 56 bus at Division together. */
+const OVERLAP = typeof location !== 'undefined' && new URLSearchParams(location.search).get('scene') === 'overlap';
+
 const BUS_FT_PER_MIN = 800; // ~9 mph with stops
 const TRAIN_FT_PER_MIN = 2200; // ~25 mph
 
@@ -177,6 +180,14 @@ export async function mockPluginFetch(_id: string, opts: { url: string }): Promi
           pid: p.pid, rt: p.rt, des: p.dir === 'Northbound' ? 'Irving Park' : 'Downtown', pdist: Math.round(b.ft), dly: false };
       });
     });
+    if (OVERLAP && rts.includes('56')) {
+      // A southbound 56 pulling up to Division, right under a train there.
+      const p = PATTERNS.find((x) => x.pid === 5602)!;
+      const ft = p.stops.find((s) => s.id === '560200')!.ft - 60;
+      const { p: pos, hdg } = at(p.line, ft);
+      vehicle.push({ vid: 'demo56', tmstmp: stamp(now), lat: String(pos[0]), lon: String(pos[1]), hdg: String(hdg),
+        pid: p.pid, rt: '56', des: 'Downtown', pdist: Math.round(ft), dly: false });
+    }
     return respond({ 'bustime-response': { vehicle } });
   }
 
@@ -189,6 +200,10 @@ export async function mockPluginFetch(_id: string, opts: { url: string }): Promi
           rt: p.rt, rtdd: p.rt, rtdir: p.dir, des: 'Somewhere', prdtm: stamp(now + mins * 60000),
           dly: b.vid.endsWith('2'), dyn: 0, prdctdn: mins < 1 ? 'DUE' : String(Math.round(mins)) };
       })));
+    if (OVERLAP && stpids.has('560200')) {
+      prd.push({ tmstmp: stamp(now), typ: 'A', stpnm: 'Milwaukee & Division/Ashland', stpid: '560200', vid: 'demo56', dstp: 60,
+        rt: '56', rtdd: '56', rtdir: 'Southbound', des: 'Downtown', prdtm: stamp(now + 20_000), dly: false, dyn: 0, prdctdn: 'DUE' });
+    }
     prd.sort((a, b) => a.prdtm.localeCompare(b.prdtm));
     return respond({ 'bustime-response': prd.length ? { prd } : { error: [{ msg: 'No arrival times' }] } });
   }
@@ -205,6 +220,12 @@ export async function mockPluginFetch(_id: string, opts: { url: string }): Promi
         arrT: isoStamp(fix + (Math.max(0, next.ft - t.ft) / TRAIN_FT_PER_MIN) * 60000),
         isApp: '0', isDly: '0', flags: null, lat: String(p[0]), lon: String(p[1]), heading: String(hdg) };
     }));
+    if (OVERLAP) {
+      const { p, hdg } = at(BLUE_SB, DIVISION_FT_SB - 40);
+      train.push({ rn: 'demo', destSt: '0', destNm: 'Forest Park', trDr: '5', nextStaId: '40320', nextStpId: '0',
+        nextStaNm: 'Division', prdt: isoStamp(now), arrT: isoStamp(now + 60_000), isApp: '1', isDly: '0', flags: null,
+        lat: String(p[0]), lon: String(p[1]), heading: String(hdg) });
+    }
     return respond({ ctatt: { tmst: isoStamp(now), errCd: '0', errNm: null, route: [{ '@name': 'blue', train }] } });
   }
 
@@ -222,6 +243,9 @@ export async function mockPluginFetch(_id: string, opts: { url: string }): Promi
         isSch: t.sch, isDly: '0', isFlt: '0', flags: null, lat: null, lon: null, heading: null,
       }));
     });
+    if (OVERLAP) {
+      eta.push({ ...eta[0], rn: 'demo', trDr: '5', destNm: 'Forest Park', arrT: isoStamp(now + 20_000), isApp: '1', isSch: '0' });
+    }
     eta.sort((a, b) => a.arrT.localeCompare(b.arrT));
     return respond({ ctatt: { tmst: isoStamp(now), errCd: '0', errNm: null, eta } });
   }

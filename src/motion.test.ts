@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { BLUE_STATIONS, BLUE_TRACK } from './blue-line';
+import { BLUE_SOUTH_LIMIT, BLUE_STATIONS, BLUE_STATIONS_SHOWN, BLUE_TRACK, BLUE_TRACK_SHOWN } from './blue-line';
 import type { LatLon } from './blue-line';
 import { milesBetween } from './cta';
 import type { Pattern, Vehicle } from './cta';
-import { MAX_BUS_COAST_MS, positionNow, stitch, Track, withObservedSpeed } from './motion';
+import { approachZone, MAX_BUS_COAST_MS, positionNow, stitch, stopsToCenter, Track, withObservedSpeed } from './motion';
 
 const FT = 1 / 5280;
 
@@ -93,5 +93,38 @@ describe('withObservedSpeed', () => {
     // Same fix again (no new data from CTA): same speed.
     const [b] = withObservedSpeed([bus({ fixMs: 30_000, pdist: 1600 })], history);
     expect(b.observedFtPerS).toBeCloseTo(20);
+  });
+});
+
+describe('approach to the center stop', () => {
+  // Stops every 500 ft, the center (Division) at 2000 ft.
+  const stops = [0, 500, 1000, 1500, 2000, 2500].map((pdist, i) => ({
+    stpid: String(i), name: `s${i}`, lat: 41.8890 + (pdist / 5280 / 69.05), lon: -87.6668, pdist,
+  }));
+  const p: Pattern = { ...ashland, stops, centerStop: stops[4] };
+
+  it('counts stops still ahead, including the center stop', () => {
+    expect(stopsToCenter(p, 100)).toBe(4); // 500, 1000, 1500, 2000
+    expect(stopsToCenter(p, 1600)).toBe(1); // Division is next
+    expect(stopsToCenter(p, 2000)).toBe(1); // at the stop
+    expect(stopsToCenter(p, 2100)).toBeNull(); // past it
+  });
+
+  it('draws the last n stops before the center', () => {
+    const zone = approachZone(p, 2)!;
+    expect(zone.stops).toHaveLength(2);
+    const t = new Track(zone.path);
+    expect(t.length).toBeGreaterThan(1000); // from just before 1000 ft to 2000 ft
+    expect(t.length).toBeLessThan(1200);
+  });
+});
+
+describe('Blue Line past Monroe', () => {
+  it('drops the Forest Park branch stops and track from the drawing', () => {
+    const names = BLUE_STATIONS_SHOWN.map((s) => s.name);
+    expect(names).toContain('Monroe');
+    expect(names).toContain('Division');
+    for (const gone of ['Jackson', 'LaSalle', 'Clinton', 'UIC-Halsted', 'Forest Park']) expect(names).not.toContain(gone);
+    expect(BLUE_TRACK_SHOWN.flat().every(([lat]) => lat >= BLUE_SOUTH_LIMIT - 1e-9)).toBe(true);
   });
 });

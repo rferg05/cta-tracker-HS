@@ -61,3 +61,32 @@ export const BLUE_STATIONS: Station[] = [
   { id: '40920', name: "Pulaski", lat: 41.8738, lon: -87.72566 },
   { id: '40970', name: "Cicero", lat: 41.87157, lon: -87.74515 },
 ];
+
+/** Past Monroe the Forest Park branch is too far from Division to say
+ *  anything about trains headed there, and its stops crowd the map. Every
+ *  station beyond Monroe lies south of it, so its latitude is the cutoff. */
+export const BLUE_SOUTH_LIMIT = 41.8806;
+
+/** Stations drawn on the map. */
+export const BLUE_STATIONS_SHOWN: Station[] = BLUE_STATIONS.filter((s) => s.lat >= BLUE_SOUTH_LIMIT);
+
+/** Track drawn on the map, cut at the limit (a crossing segment ends exactly
+ *  on it). The motion model still uses the full `BLUE_TRACK`. */
+export const BLUE_TRACK_SHOWN: LatLon[][] = BLUE_TRACK.flatMap((seg) => {
+  const out: LatLon[][] = [];
+  let cur: LatLon[] = [];
+  for (let i = 0; i < seg.length; i++) {
+    const p = seg[i];
+    const prev = seg[i - 1];
+    const keep = p[0] >= BLUE_SOUTH_LIMIT;
+    if (prev && (prev[0] >= BLUE_SOUTH_LIMIT) !== keep) {
+      const t = (BLUE_SOUTH_LIMIT - prev[0]) / (p[0] - prev[0]);
+      const edge: LatLon = [BLUE_SOUTH_LIMIT, prev[1] + (p[1] - prev[1]) * t];
+      cur.push(edge);
+      if (!keep) { out.push(cur); cur = []; }
+    }
+    if (keep) cur.push(p);
+  }
+  if (cur.length) out.push(cur);
+  return out.filter((s) => s.length >= 2);
+});

@@ -6,7 +6,8 @@ Out of the box it's centered on Division (Blue Line) at Milwaukee/Division/Ashla
 
 ## Reading it
 
-- **Map**: north is up. Each vehicle points in its direction of travel and is drawn slightly to the right of its street, so buses going opposite ways don't overlap. Blue Line trains are squares and buses are circles in their route's color.
+- **Map**: north is up. Trains are long Blue Line rail cars lying along the track, with a chevron toward the front. Buses are round badges in their route's color, with a bus pictogram and a pointed nose aimed the way they're going. Vehicles are drawn slightly to the right of their street, so buses going opposite ways don't overlap. Where two would still overlap (a train over Milwaukee and a 56 at Division, say), they're pushed apart so both show; a vehicle that already passed gives way to one still coming. Time tags pick whichever side of their vehicle is clear. The *Vehicle icons* setting also offers round badges for both, or square trains with round buses. The Blue Line is drawn only as far as Monroe: the Forest Park branch past it is too far out to matter for Division.
+- **Almost there**: a bus within 4 stops of Division is drawn larger with a halo, and its tag and board chip show the stops left ("2 stops", "next stop"). For the 56, those last 4 stops are also drawn as a bright stretch of route with stop dots, in both directions, so a bus inside it stands out.
 - **Bright with a time tag**: headed toward the center stop, with its predicted arrival there.
 - **Faded**: already past the center stop. Turn off *Show vehicles that already passed* to hide these.
 - **Arrivals board**: the next 3 arrivals per route and direction.
@@ -46,6 +47,9 @@ Drawn positions update once a second and the browser animates between them, so m
 | Blue Line station ID | `40320` (Division) | Train Tracker map ID. The track drawing only covers the Blue Line. |
 | Center lat / lon / label | Division station | Moving it re-picks the bus stops. Keep it within about 5 miles of Division so the Blue Line track still draws. |
 | Map radius | 1.5 mi | About 10 minutes of bus travel and 4 of train. |
+| Vehicle icons | Train as a rail car, buses round | Or round badges for both, or square trains. |
+| Emphasize buses within | 4 stops | 0 turns it off. |
+| Highlight approach stops for routes | `56` | Comma-separated, e.g. `56,70`. |
 | Check vehicle positions every | 10 s | 10–60 s. Markers move smoothly either way. |
 | Check arrival times every | 30 s | 15–120 s. |
 
@@ -70,7 +74,7 @@ npm run preview      # module against a mock CTA feed at http://localhost:5174
 npm run build        # dist/bundle.js
 ```
 
-The preview accepts query parameters for size and any config key, e.g. `?w=520&h=800&layout=stacked&radiusMiles=2`.
+The preview accepts query parameters for size and any config key, e.g. `?w=520&h=800&layout=stacked&radiusMiles=2`. `fs=24` sets the text size, and `scene=overlap` parks a train and a 56 bus at Division together.
 
 Release tarball:
 

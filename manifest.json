@@ -1,7 +1,7 @@
 {
   "id": "cta-tracker",
   "name": "CTA Tracker",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Live map of CTA trains and buses around one stop, with the next arrivals in each direction.",
   "author": "Ryan",
   "license": "MIT",
@@ -22,7 +22,10 @@
     "arrivalsPerDirection": 3,
     "timeFormat": "minutes",
     "showPassed": true,
-    "showStreets": true
+    "showStreets": true,
+    "nearStops": 4,
+    "highlightRoutes": "56",
+    "iconStyle": "car"
   },
   "defaultSize": {
     "w": 960,
@@ -82,6 +85,31 @@
         "type": "boolean",
         "title": "Show major streets",
         "ui:widget": "toggle",
+        "ui:group": "Layout"
+      },
+      "iconStyle": {
+        "type": "string",
+        "title": "Vehicle icons",
+        "enum": ["badge", "car", "tile"],
+        "enumLabels": ["Round badges with a pointed nose", "Train as a rail car, buses round", "Square trains, round buses, outside arrow"],
+        "ui:widget": "select",
+        "ui:group": "Layout"
+      },
+      "nearStops": {
+        "type": "number",
+        "title": "Emphasize buses within (stops)",
+        "description": "Buses this many stops or fewer from the center are drawn larger with a halo and a stop count. 0 turns it off.",
+        "minimum": 0,
+        "maximum": 10,
+        "ui:widget": "slider",
+        "ui:step": 1,
+        "ui:group": "Layout"
+      },
+      "highlightRoutes": {
+        "type": "string",
+        "title": "Highlight approach stops for routes",
+        "description": "Comma-separated. The last stops before the center on these routes are drawn bright, in both directions.",
+        "ui:widget": "text",
         "ui:group": "Layout"
       },
       "busRoutes": {

@@ -2,14 +2,14 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import type { CSSProperties } from 'react';
 import type { PluginComponentProps } from './hs-plugin';
 import { hostFrameStyle } from './host-style';
-import { BLUE_STATIONS, BLUE_TRACK } from './blue-line';
+import { BLUE_SOUTH_LIMIT, BLUE_STATIONS_SHOWN, BLUE_TRACK_SHOWN } from './blue-line';
 import type { LatLon } from './blue-line';
 import {
   busRowKey, classify, loadArrivals, loadPatterns, loadPositions, message, parseRoutes, PATTERN_TTL_MS,
   trainRowKey,
 } from './cta';
 import type { Arrival, ArrivalData, FetchJson, LiveRequest, Pattern, PositionData, Vehicle } from './cta';
-import { positionNow, withObservedSpeed } from './motion';
+import { approachZone, busPdistNow, positionNow, stopsToCenter, withObservedSpeed } from './motion';
 
 const PLUGIN_ID = 'cta-tracker';
 
@@ -54,6 +54,11 @@ interface Config {
   timeFormat: 'minutes' | 'clock' | 'both';
   showPassed: boolean;
   showStreets: boolean;
+  /** A bus this many stops or fewer from the center is emphasized; 0 = off. */
+  nearStops: number;
+  /** Routes whose approach zone (the last `nearStops` stops) is drawn. */
+  highlightRoutes: string[];
+  iconStyle: IconStyle;
 }
 
 function readConfig(raw: Record<string, unknown>): Config {
@@ -77,6 +82,9 @@ function readConfig(raw: Record<string, unknown>): Config {
     timeFormat: pick(raw.timeFormat, ['minutes', 'clock', 'both'], 'minutes'),
     showPassed: raw.showPassed !== false,
     showStreets: raw.showStreets !== false,
+    nearStops: Math.round(n(raw.nearStops, 4, 0, 10)),
+    highlightRoutes: parseRoutes(typeof raw.highlightRoutes === 'string' ? raw.highlightRoutes : '56'),
+    iconStyle: pick(raw.iconStyle, ['badge', 'car', 'tile'], 'car'),
   };
 }
 
@@ -389,6 +397,59 @@ function pathOf(points: LatLon[], proj: Projection): string {
   return d;
 }
 
+interface Placed {
+  v: Vehicle;
+  x: number;
+  y: number;
+  r: number;
+  /** Radius the marker needs clear around it. */
+  hit: number;
+  color: string;
+  faded: boolean;
+  near: boolean;
+  label: string | null;
+  /** Where the time tag goes, relative to the vehicle (set by placeTags). */
+  tag?: { dx: number; dy: number; w: number; h: number; fs: number };
+}
+
+/** Push overlapping markers apart until each one is visible. A faded
+ *  (already passed) marker gives way to one still coming, so the vehicles
+ *  that matter stay where they really are; two of the same rank split the
+ *  move. A few passes settle clusters of three or more. */
+function separate(items: Placed[], passes = 6): void {
+  for (let pass = 0; pass < passes; pass++) {
+    let moved = false;
+    for (let i = 0; i < items.length; i++) {
+      for (let j = i + 1; j < items.length; j++) {
+        const a = items[i];
+        const b = items[j];
+        const need = a.hit + b.hit;
+        let dx = b.x - a.x;
+        let dy = b.y - a.y;
+        let d = Math.hypot(dx, dy);
+        if (d >= need) continue;
+        if (d < 0.5) {
+          // Exactly on top of each other: split across b's direction of travel.
+          const rad = (b.v.heading * Math.PI) / 180;
+          dx = Math.cos(rad);
+          dy = Math.sin(rad);
+          d = 1;
+        }
+        const push = need - Math.hypot(b.x - a.x, b.y - a.y);
+        const ux = dx / d;
+        const uy = dy / d;
+        const share = a.faded === b.faded ? 0.5 : a.faded ? 1 : 0;
+        a.x -= ux * push * share;
+        a.y -= uy * push * share;
+        b.x += ux * push * (1 - share);
+        b.y += uy * push * (1 - share);
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
+}
+
 interface MapProps {
   w: number;
   h: number;
@@ -404,10 +465,15 @@ interface MapProps {
   showPassed: boolean;
   showStreets: boolean;
   timeFormat: Config['timeFormat'];
+  nearStops: number;
+  highlightRoutes: string[];
+  /** Stops to go before the center, by bus id, for buses headed there. */
+  busStops: Map<string, number>;
+  iconStyle: IconStyle;
 }
 
 function TransitMap(props: MapProps) {
-  const { w, h, fontPx, center, radius, routes, patterns, vehicles, arrivals, now } = props;
+  const { w, h, fontPx, center, radius, routes, patterns, vehicles, arrivals, now, nearStops } = props;
   const proj = useMemo(() => makeProjection(center, radius, w, h), [center[0], center[1], radius, w, h]);
 
   const routePaths = useMemo(() => {
@@ -423,7 +489,28 @@ function TransitMap(props: MapProps) {
     return out;
   }, [patterns, proj, routes]);
 
-  const bluePaths = useMemo(() => BLUE_TRACK.map((seg) => pathOf(seg, proj)).filter(Boolean), [proj]);
+  const bluePaths = useMemo(() => BLUE_TRACK_SHOWN.map((seg) => pathOf(seg, proj)).filter(Boolean), [proj]);
+
+  // The last few stops before the center on highlighted routes, drawn bright
+  // so a bus inside them reads as "almost here" at a glance.
+  const zones = useMemo(() => {
+    if (nearStops < 1) return [];
+    const seen = new Set<string>();
+    return patterns.flatMap((p) => {
+      if (!props.highlightRoutes.includes(p.route.toUpperCase())) return [];
+      const zone = approachZone(p, nearStops);
+      // Short-turn patterns share the same approach; draw each once.
+      const key = `${p.route}:${p.dir}:${zone?.stops.map((s) => s.join()).join('|')}`;
+      if (!zone || seen.has(key)) return [];
+      seen.add(key);
+      return [{
+        key: p.pid,
+        d: pathOf(zone.path, proj),
+        stops: zone.stops.map((s) => [proj.x(s), proj.y(s)] as [number, number]),
+        color: routeColor(routes, p.route),
+      }];
+    });
+  }, [patterns, proj, routes, nearStops, props.highlightRoutes]);
 
   const streets = useMemo(() => {
     if (!props.showStreets) return [];
@@ -466,14 +553,54 @@ function TransitMap(props: MapProps) {
         : undefined;
       return { v, at: positionNow(v, now, byPid, implied) };
     })
-    .filter(({ at }) => proj.inView(at, 1.02));
-  // Faded ones underneath, so an approaching vehicle is never hidden.
-  visible.sort((a, b) => Number(a.v.approaching !== false) - Number(b.v.approaching !== false)
-    || Number(a.v.kind === 'train') - Number(b.v.kind === 'train'));
+    // Trains past Monroe toward Forest Park are off the drawn line.
+    .filter(({ v, at }) => proj.inView(at, 1.02) && !(v.kind === 'train' && at[0] < BLUE_SOUTH_LIMIT - 0.0005));
+  // Faded ones underneath, so an approaching vehicle is never hidden, and
+  // buses about to reach the center on top of everything.
+  const layer = (v: Vehicle) => {
+    if (v.approaching === false) return 0;
+    const stops = v.kind === 'bus' ? props.busStops.get(v.id) : undefined;
+    if (stops !== undefined && stops <= nearStops) return 3;
+    return v.kind === 'train' ? 2 : 1;
+  };
+  visible.sort((a, b) => layer(a.v) - layer(b.v));
 
   const busR = fontPx * 0.62;
   const trainR = fontPx * 0.8;
   const small = fontPx * 0.72;
+
+  const placed: Placed[] = visible.map(({ v, at }) => {
+    const color = v.kind === 'train' ? BLUE : routeColor(routes, v.route);
+    const faded = v.approaching === false;
+    const stops = v.kind === 'bus' && !faded ? props.busStops.get(v.id) : undefined;
+    const near = stops !== undefined && nearStops > 0 && stops <= nearStops;
+    const r = (v.kind === 'train' ? trainR : busR) * (near ? 1.3 : 1);
+    const rad = (v.heading * Math.PI) / 180;
+    // Nudge each vehicle to the right of its direction of travel, so two
+    // buses passing on one street don't sit on top of each other.
+    const off = r * 0.9;
+    const eta = etaByVehicle.get(`${v.kind}:${v.id}`);
+    let label = eta && !faded
+      ? (props.timeFormat === 'clock' ? clock(eta.etaMs) : shortMinutes(eta.etaMs, now))
+      : null;
+    if (near) label = `${label ? `${label} · ` : ''}${stops === 1 ? 'next stop' : `${stops} stops`}`;
+    return {
+      v, color, faded, near, label, r,
+      x: proj.x(at) + Math.cos(rad) * off,
+      y: proj.y(at) + Math.sin(rad) * off,
+      hit: near ? r * 1.7 : r * (props.iconStyle === 'car' && v.kind === 'train' ? 1.45 : 1.15),
+    };
+  });
+  // The Blue Line runs right over Milwaukee, so a train and a 56 bus at
+  // Division land on the same spot; push overlapping markers apart.
+  separate(placed);
+  const labelW = (props.centerLabel.length * 0.62 + 0.3) * fontPx * 0.85;
+  placeTags(placed, small, [
+    // The center stop and its label
+    { x0: w / 2 - fontPx * 0.5, y0: h / 2 - fontPx * 0.5, x1: w / 2 + fontPx * 0.5, y1: h / 2 + fontPx * 0.5 },
+    { x0: w / 2 + fontPx * 0.9, y0: h / 2 - fontPx * 1.7, x1: w / 2 + fontPx * 0.9 + labelW, y1: h / 2 - fontPx * 0.6 },
+  ], { x0: 0, y0: 0, x1: w, y1: h });
+
   const cx = w / 2;
   const cy = h / 2;
   const scaleMiles = radius >= 2 ? 1 : 0.5;
@@ -497,7 +624,18 @@ function TransitMap(props: MapProps) {
           strokeWidth={fontPx * 0.42} strokeLinecap="round" strokeLinejoin="round" />
       ))}
 
-      {BLUE_STATIONS.filter((s) => proj.inView([s.lat, s.lon], 1)).map((s) => {
+      {zones.map((z) => (
+        <g key={`zone${z.key}`}>
+          <path d={z.d} fill="none" stroke={z.color} strokeOpacity={0.28}
+            strokeWidth={fontPx * 0.95} strokeLinecap="round" strokeLinejoin="round" />
+          <path d={z.d} fill="none" stroke={z.color}
+            strokeWidth={fontPx * 0.3} strokeLinecap="round" strokeLinejoin="round" />
+          {z.stops.map(([x, y], i) => (
+            <circle key={i} cx={x} cy={y} r={fontPx * 0.2} fill="#111" stroke={z.color} strokeWidth={fontPx * 0.1} />
+          ))}
+        </g>
+      ))}
+      {BLUE_STATIONS_SHOWN.filter((s) => proj.inView([s.lat, s.lon], 1)).map((s) => {
         const x = proj.x([s.lat, s.lon]);
         const y = proj.y([s.lat, s.lon]);
         const isCenter = Math.hypot(x - cx, y - cy) < fontPx * 0.5;
@@ -516,24 +654,13 @@ function TransitMap(props: MapProps) {
         strokeWidth={1.5} strokeDasharray="3 3" />
       <circle cx={cx} cy={cy} r={fontPx * 0.38} fill="#fff" stroke="#000" strokeWidth={1.5} />
       {props.centerLabel && (
-        <text x={cx - fontPx * 1.3} y={cy + fontPx * 0.35} fontSize={fontPx * 0.85} fontWeight={700}
-          textAnchor="end" fill="currentColor" style={haloStyle}>{props.centerLabel}</text>
+        // Up and right of the stop: at Division that corner is clear of
+        // Milwaukee (NW-SE), Division (E-W) and Ashland (N-S).
+        <text x={cx + fontPx * 0.9} y={cy - fontPx * 0.9} fontSize={fontPx * 0.85} fontWeight={700}
+          textAnchor="start" fill="currentColor" style={haloStyle}>{props.centerLabel}</text>
       )}
 
-      {visible.map(({ v, at }) => {
-        const color = v.kind === 'train' ? BLUE : routeColor(routes, v.route);
-        const r = v.kind === 'train' ? trainR : busR;
-        const rad = (v.heading * Math.PI) / 180;
-        // Nudge each vehicle to the right of its direction of travel, so two
-        // buses passing on one street don't sit on top of each other.
-        const off = r * 0.9;
-        const x = proj.x(at) + Math.cos(rad) * off;
-        const y = proj.y(at) + Math.sin(rad) * off;
-        const faded = v.approaching === false;
-        const eta = etaByVehicle.get(`${v.kind}:${v.id}`);
-        const label = eta && !faded
-          ? (props.timeFormat === 'clock' ? clock(eta.etaMs) : shortMinutes(eta.etaMs, now))
-          : null;
+      {placed.map(({ v, x, y, r, color, faded, near, label, tag }) => {
         return (
           <g key={`${v.kind}:${v.id}`} style={{
             // Glide from the last drawn position to this one over exactly one
@@ -543,14 +670,10 @@ function TransitMap(props: MapProps) {
             transition: `transform ${MOTION_TICK_MS}ms linear, opacity 1s`,
             opacity: faded ? 0.3 : 1,
           }}>
-            {v.kind === 'train'
-              ? <rect x={-r} y={-r} width={r * 2} height={r * 2} rx={r * 0.35} fill={color} stroke="#fff" strokeWidth={1.5} />
-              : <circle r={r} fill={color} stroke="#000" strokeWidth={1.2} />}
-            <path transform={`rotate(${v.heading})`} d={`M0 ${-r * 0.7} L${r * 0.55} ${r * 0.45} L0 ${r * 0.15} L${-r * 0.55} ${r * 0.45} Z`}
-              fill={v.kind === 'train' ? '#fff' : '#000'} />
-            {label && (
-              <EtaTag x={Math.cos(rad) * r * 1.1} y={Math.sin(rad) * r * 1.1} right={Math.cos(rad) >= 0}
-                text={label} color={color} fontPx={small} />
+            {near && <circle r={r * 1.7} fill={color} fillOpacity={0.3} stroke={color} strokeOpacity={0.9} strokeWidth={1.5} />}
+            <VehicleIcon kind={v.kind} r={r} heading={v.heading} color={color} style={props.iconStyle} />
+            {label && tag && (
+              <EtaTag x={tag.dx} y={tag.dy} w={tag.w} h={tag.h} text={label} color={color} fontPx={tag.fs} />
             )}
           </g>
         );
@@ -567,6 +690,97 @@ function TransitMap(props: MapProps) {
   );
 }
 
+// Pictograms from Lucide (ISC license): `bus-front` and `train-front`, on a
+// 24-unit grid drawn as 2-unit strokes.
+const BUS_GLYPH = [
+  'M4 6 2 7', 'M10 6h4', 'm22 7-2-1', 'M6 3h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z',
+  'M4 11h16', 'M8 15h.01', 'M16 15h.01', 'M6 19v2', 'M18 21v-2',
+];
+const TRAIN_GLYPH = [
+  'M8 3.1V7a4 4 0 0 0 8 0V3.1', 'm9 15-1-1', 'm15 15 1-1',
+  'M9 19c-2.8 0-5-2.2-5-5v-4a8 8 0 0 1 16 0v4c0 2.8-2.2 5-5 5Z', 'm8 19-2 3', 'm16 19 2 3',
+];
+
+type IconStyle = 'badge' | 'car' | 'tile';
+
+function Glyph(props: { kind: 'train' | 'bus'; r: number; ink: string }) {
+  const glyph = (props.r * 1.25) / 24;
+  return (
+    <g transform={`scale(${glyph}) translate(-12 -12)`} fill="none" stroke={props.ink}
+      strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
+      {(props.kind === 'train' ? TRAIN_GLYPH : BUS_GLYPH).map((d, i) => <path key={i} d={d} />)}
+    </g>
+  );
+}
+
+function VehicleIcon(props: { kind: 'train' | 'bus'; r: number; heading: number; color: string; style: IconStyle }) {
+  if (props.style === 'car') return props.kind === 'train' ? <TrainCar {...props} /> : <Badge {...props} />;
+  if (props.style === 'tile') return <Tile {...props} />;
+  return <Badge {...props} />;
+}
+
+/** Top-down rail car, long and aligned with the track, with a pointed cab
+ *  at the front and a coupling line between two cars: nothing like a bus. */
+function TrainCar(props: { r: number; heading: number; color: string }) {
+  const { r, color } = props;
+  const w = r * 0.78; // half width
+  const len = r * 1.9; // half length
+  const cab = r * 0.75; // taper of the front
+  const body = `M${-w} ${len} L${-w} ${-len + cab} Q${-w} ${-len} 0 ${-len - r * 0.15} `
+    + `Q${w} ${-len} ${w} ${-len + cab} L${w} ${len} Q${w} ${len + r * 0.2} 0 ${len + r * 0.2} `
+    + `Q${-w} ${len + r * 0.2} ${-w} ${len} Z`;
+  return (
+    <g transform={`rotate(${props.heading})`}>
+      <path d={body} fill={color} stroke="#fff" strokeWidth={1.8} strokeLinejoin="round" />
+      {/* Windshield, then the gap between the two cars */}
+      <path d={`M${-w * 0.55} ${-len + cab * 0.9} L${w * 0.55} ${-len + cab * 0.9}`} stroke="#fff" strokeWidth={r * 0.28} strokeLinecap="round" />
+      <path d={`M${-w} ${len * 0.18} L${w} ${len * 0.18}`} stroke="rgba(0,0,0,0.55)" strokeWidth={1.5} />
+      {/* Chevron pointing forward on the lead car */}
+      <path d={`M${-w * 0.5} ${-len * 0.05} L0 ${-len * 0.45} L${w * 0.5} ${-len * 0.05}`}
+        stroke="#fff" strokeWidth={r * 0.22} strokeLinecap="round" strokeLinejoin="round" fill="none" />
+    </g>
+  );
+}
+
+/** Square for trains, circle for buses, each with an upright pictogram and a
+ *  separate arrow just outside it showing which way it's going. */
+function Tile(props: { kind: 'train' | 'bus'; r: number; heading: number; color: string }) {
+  const { r, color } = props;
+  const train = props.kind === 'train';
+  const edge = train ? r * 1.12 : r;
+  return (
+    <g>
+      <path d={`M${-r * 0.5} ${-edge - r * 0.12} L0 ${-edge - r * 0.75} L${r * 0.5} ${-edge - r * 0.12} Z`}
+        transform={`rotate(${props.heading})`} fill={color} stroke={train ? '#fff' : '#000'} strokeWidth={1.2} strokeLinejoin="round" />
+      {train
+        ? <rect x={-r} y={-r} width={r * 2} height={r * 2} rx={r * 0.3} fill={color} stroke="#fff" strokeWidth={1.8} />
+        : <circle r={r} fill={color} stroke="#000" strokeWidth={1.2} />}
+      <Glyph kind={props.kind} r={r} ink={train ? '#fff' : '#000'} />
+    </g>
+  );
+}
+
+/** A round badge with a pointed nose aimed along the heading, and an
+ *  upright train or bus pictogram inside. */
+function Badge(props: { kind: 'train' | 'bus'; r: number; heading: number; color: string }) {
+  const { r, color } = props;
+  const train = props.kind === 'train';
+  const ink = train ? '#fff' : '#000';
+  // Circle of radius r with a tip 1.75r out: the tangent points sit at
+  // asin(1/1.75) ~ 35 deg either side of the nose.
+  const tip = r * 1.75;
+  const tx = r * 0.82;
+  const ty = -r * 0.57;
+  const badge = `M0 ${-tip} L${tx} ${ty} A${r} ${r} 0 1 1 ${-tx} ${ty} Z`;
+  return (
+    <g>
+      <path d={badge} transform={`rotate(${props.heading})`} fill={color}
+        stroke={train ? '#fff' : '#000'} strokeWidth={train ? 1.6 : 1.2} strokeLinejoin="round" />
+      <Glyph kind={props.kind} r={r} ink={ink} />
+    </g>
+  );
+}
+
 const haloStyle: CSSProperties = {
   paintOrder: 'stroke',
   stroke: 'rgba(0,0,0,0.85)',
@@ -574,27 +788,75 @@ const haloStyle: CSSProperties = {
   strokeLinejoin: 'round',
 };
 
-function EtaTag(props: { x: number; y: number; right: boolean; text: string; color: string; fontPx: number }) {
-  const { fontPx, text } = props;
-  const tw = text.length * fontPx * 0.62 + fontPx * 0.6;
-  const th = fontPx * 1.35;
-  const x = props.right ? props.x : props.x - tw;
+/** A time tag; `x`/`y` is its top-left corner relative to the vehicle. */
+function EtaTag(props: { x: number; y: number; w: number; h: number; text: string; color: string; fontPx: number }) {
+  const { x, y, w, h, fontPx } = props;
   return (
     <g>
-      <rect x={x} y={props.y - th / 2} width={tw} height={th} rx={th / 2}
+      <rect x={x} y={y} width={w} height={h} rx={h / 2}
         fill="rgba(0,0,0,0.8)" stroke={props.color} strokeWidth={1.5} />
-      <text x={x + tw / 2} y={props.y + fontPx * 0.36} fontSize={fontPx} fontWeight={700}
-        textAnchor="middle" fill="#fff">{text}</text>
+      <text x={x + w / 2} y={y + h / 2 + fontPx * 0.36} fontSize={fontPx} fontWeight={700}
+        textAnchor="middle" fill="#fff">{props.text}</text>
     </g>
   );
 }
 
+interface Box { x0: number; y0: number; x1: number; y1: number }
+
+function overlapArea(a: Box, b: Box): number {
+  return Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0))
+    * Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0));
+}
+
+/** Put each time tag on whichever side of its vehicle (right of travel
+ *  first, then the other side, above, below) covers the least of the other
+ *  vehicles, tags and `keepClear` boxes. The vehicles closest to the center
+ *  choose first, since their tags matter most. */
+function placeTags(items: Placed[], small: number, keepClear: Box[], view: Box): void {
+  const viewArea = (b: Box) => (b.x1 - b.x0) * (b.y1 - b.y0);
+  const icons: Box[] = items.map((it) => ({ x0: it.x - it.hit, y0: it.y - it.hit, x1: it.x + it.hit, y1: it.y + it.hit }));
+  const taken: Box[] = [];
+  const order = items.map((_, i) => i).reverse(); // items are sorted lowest layer first
+  for (const i of order) {
+    const it = items[i];
+    if (!it.label) continue;
+    const fs = it.near ? small * 1.1 : small;
+    const w = it.label.length * fs * 0.62 + fs * 0.6;
+    const h = fs * 1.35;
+    const gap = it.hit + fs * 0.15;
+    const right = Math.cos((it.v.heading * Math.PI) / 180) >= 0;
+    const sides: [number, number][] = [
+      [gap, -h / 2], [-gap - w, -h / 2], [-w / 2, -gap - h], [-w / 2, gap],
+    ];
+    if (!right) [sides[0], sides[1]] = [sides[1], sides[0]];
+    let best = sides[0];
+    let bestScore = Infinity;
+    for (const [dx, dy] of sides) {
+      const box = { x0: it.x + dx, y0: it.y + dy, x1: it.x + dx + w, y1: it.y + dy + h };
+      let score = 0;
+      icons.forEach((b, j) => { if (j !== i) score += overlapArea(box, b); });
+      for (const b of taken) score += overlapArea(box, b) * 2; // tag on tag is worst
+      for (const b of keepClear) score += overlapArea(box, b);
+      score += (viewArea(box) - overlapArea(box, view)) * 3; // cut off by the map edge
+      if (score < bestScore - 0.5) { best = [dx, dy]; bestScore = score; }
+    }
+    it.tag = { dx: best[0], dy: best[1], w, h, fs };
+    taken.push({ x0: it.x + best[0], y0: it.y + best[1], x1: it.x + best[0] + w, y1: it.y + best[1] + h });
+  }
+}
+
 // ── Arrivals board ──────────────────────────────────────────────────────────
 
-function ArrivalChip(props: { a: Arrival; now: number; fmt: Config['timeFormat']; color: string; tracked: boolean }) {
+function ArrivalChip(props: {
+  a: Arrival; now: number; fmt: Config['timeFormat']; color: string; tracked: boolean;
+  /** Stops to go, set only when the bus is within the "near" count. */
+  nearStops?: number;
+}) {
   const { a, now, fmt } = props;
   const main = fmt === 'clock' ? clock(a.etaMs) : shortMinutes(a.etaMs, now);
-  const sub = fmt === 'both' ? clock(a.etaMs) : null;
+  const near = props.nearStops !== undefined;
+  const stopsText = near ? (props.nearStops === 1 ? 'next stop' : `${props.nearStops} stops`) : null;
+  const sub = [fmt === 'both' ? clock(a.etaMs) : null, stopsText].filter(Boolean).join(' · ') || null;
   // A dashed chip is a timetable promise with no vehicle seen behind it:
   // the one to be skeptical of.
   const ghost = a.scheduled || !props.tracked;
@@ -603,8 +865,8 @@ function ArrivalChip(props: { a: Arrival; now: number; fmt: Config['timeFormat']
       minWidth: '3.4em',
       padding: '0.15em 0.4em',
       borderRadius: '0.4em',
-      border: `0.1em ${ghost ? 'dashed' : 'solid'} ${ghost ? 'rgba(255,255,255,0.45)' : props.color}`,
-      background: ghost ? 'transparent' : 'rgba(255,255,255,0.08)',
+      border: `${near ? '0.18em' : '0.1em'} ${ghost ? 'dashed' : 'solid'} ${ghost ? 'rgba(255,255,255,0.45)' : props.color}`,
+      background: ghost ? 'transparent' : near ? `${props.color}40` : 'rgba(255,255,255,0.08)',
       opacity: ghost ? 0.75 : 1,
       textAlign: 'center',
       lineHeight: 1.1,
@@ -612,13 +874,14 @@ function ArrivalChip(props: { a: Arrival; now: number; fmt: Config['timeFormat']
       <div style={{ fontWeight: 700, fontSize: '1.05em', color: a.delayed ? '#FBBF24' : undefined }}>
         {ghost && a.scheduled ? '~' : ''}{main}
       </div>
-      {sub && <div style={{ fontSize: '0.7em', opacity: 0.7 }}>{sub}</div>}
+      {sub && <div style={{ fontSize: '0.7em', opacity: near ? 0.95 : 0.7, fontWeight: near ? 700 : undefined }}>{sub}</div>}
     </div>
   );
 }
 
 function Board(props: {
   rows: Row[]; now: number; fmt: Config['timeFormat']; vehicleIds: Set<string>;
+  busStops: Map<string, number>; nearStops: number;
   footer: React.ReactNode;
 }) {
   const { rows, now } = props;
@@ -638,7 +901,8 @@ function Board(props: {
               {r.arrivals.length
                 ? r.arrivals.map((a, i) => (
                   <ArrivalChip key={`${a.vehicleId}:${i}`} a={a} now={now} fmt={props.fmt} color={r.color}
-                    tracked={props.vehicleIds.has(`${a.kind}:${a.vehicleId}`)} />
+                    tracked={props.vehicleIds.has(`${a.kind}:${a.vehicleId}`)}
+                    nearStops={a.kind === 'bus' ? nearCount(props.busStops.get(a.vehicleId), props.nearStops) : undefined} />
                 ))
                 : <div style={{ opacity: 0.45, fontSize: '0.85em' }}>No arrivals</div>}
             </div>
@@ -648,6 +912,33 @@ function Board(props: {
       {props.footer}
     </div>
   );
+}
+
+function nearCount(stops: number | undefined, limit: number): number | undefined {
+  return stops !== undefined && limit > 0 && stops <= limit ? stops : undefined;
+}
+
+/** Stops to go before the center, by bus id, for buses headed there. Uses
+ *  the same advanced position the map draws, so the two always agree. */
+function stopsByBus(
+  vehicles: Vehicle[], patterns: Pattern[], arrivals: Arrival[], now: number,
+): Map<string, number> {
+  const byPid = new Map(patterns.map((p) => [p.pid, p]));
+  const implied = new Map<string, number>();
+  for (const a of arrivals) {
+    if (a.kind === 'bus' && a.impliedFtPerS !== undefined && !implied.has(a.vehicleId)) {
+      implied.set(a.vehicleId, a.impliedFtPerS);
+    }
+  }
+  const out = new Map<string, number>();
+  for (const v of vehicles) {
+    if (v.kind !== 'bus' || v.approaching === false || !v.pid) continue;
+    const p = byPid.get(v.pid);
+    const pdist = busPdistNow(v, now, byPid, implied.get(v.id));
+    const n = p && pdist !== null ? stopsToCenter(p, pdist) : null;
+    if (n !== null) out.set(v.id, n);
+  }
+  return out;
 }
 
 // ── Root ────────────────────────────────────────────────────────────────────
@@ -679,6 +970,10 @@ export default function CtaTracker(props: PluginComponentProps) {
 
   const patternList = patterns?.patterns ?? [];
   const rows = buildRows(routes, cfg.trainStation, patternList, data, now, cfg.arrivalsPerDirection);
+  const busStops = useMemo(
+    () => stopsByBus(vehicles, patternList, data?.arrivals ?? [], now),
+    [vehicles, patternList, data, now],
+  );
   const vehicleIds = useMemo(() => new Set(vehicles.map((v) => `${v.kind}:${v.id}`)), [vehicles]);
 
   const errors = [
@@ -704,6 +999,9 @@ export default function CtaTracker(props: PluginComponentProps) {
         </span>
         <span>Solid: tracked vehicle</span>
         <span>Dashed: schedule only</span>
+        {cfg.nearStops > 0 && cfg.highlightRoutes.length > 0 && (
+          <span>Bright: last {cfg.nearStops} stops before {cfg.centerLabel || 'the stop'}</span>
+        )}
       </div>
     </div>
   );
@@ -717,6 +1015,8 @@ export default function CtaTracker(props: PluginComponentProps) {
           routes={routes} patterns={patternList}
           vehicles={vehicles} arrivals={data?.arrivals ?? []} now={now}
           showPassed={cfg.showPassed} showStreets={cfg.showStreets} timeFormat={cfg.timeFormat}
+          nearStops={cfg.nearStops} highlightRoutes={cfg.highlightRoutes} busStops={busStops}
+          iconStyle={cfg.iconStyle}
         />
       )}
       {layout === 'map' && (
@@ -740,7 +1040,8 @@ export default function CtaTracker(props: PluginComponentProps) {
         <div style={layout === 'side'
           ? { flex: '1 1 0', minWidth: '17em', minHeight: 0 }
           : { flex: '0 0 auto', minHeight: 0 }}>
-          <Board rows={rows} now={now} fmt={cfg.timeFormat} vehicleIds={vehicleIds} footer={footer} />
+          <Board rows={rows} now={now} fmt={cfg.timeFormat} vehicleIds={vehicleIds}
+            busStops={busStops} nearStops={cfg.nearStops} footer={footer} />
         </div>
       )}
     </div>

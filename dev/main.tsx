@@ -13,14 +13,14 @@ const cache = new Map<string, unknown>();
 };
 
 const style = {
-  fontSize: 16, fontFamily: 'inter', textColor: '#ffffff', backgroundColor: 'rgba(0, 0, 0, 0.55)',
+  fontSize: Number(new URLSearchParams(location.search).get('fs') ?? 16), fontFamily: 'inter', textColor: '#ffffff', backgroundColor: 'rgba(0, 0, 0, 0.55)',
   borderRadius: 12, padding: 12, opacity: 1, backdropBlur: 12,
 };
 
 const params = new URLSearchParams(location.search);
 const w = Number(params.get('w') ?? manifest.defaultSize.w);
 const h = Number(params.get('h') ?? manifest.defaultSize.h);
-const config = { ...manifest.defaultConfig, ...Object.fromEntries([...params].filter(([k]) => k !== 'w' && k !== 'h')) };
+const config = { ...manifest.defaultConfig, ...Object.fromEntries([...params].filter(([k]) => !['w', 'h', 'scene', 'fs'].includes(k))) };
 
 createRoot(document.getElementById('root')!).render(
   <div style={{ width: w, height: h }}>

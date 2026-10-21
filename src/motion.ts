@@ -71,6 +71,18 @@ export class Track {
     return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
   }
 
+  /** The part of the line between two distances along it. */
+  slice(fromFt: number, toFt: number): LatLon[] {
+    const a = Math.max(0, Math.min(fromFt, toFt));
+    const b = Math.min(this.length, Math.max(fromFt, toFt));
+    const out: LatLon[] = [this.at(a)];
+    for (let i = 0; i < this.pts.length; i++) {
+      if (this.cum[i] > a && this.cum[i] < b) out.push(this.pts[i]);
+    }
+    out.push(this.at(b));
+    return out;
+  }
+
   /** The nearest point on the line: how far along it, and how far off it (ft). */
   project(p: LatLon): { ft: number; offFt: number } {
     let best = { ft: 0, offFt: Infinity };
@@ -129,7 +141,7 @@ function blue(): Track[] {
 const stationById = new Map(BLUE_STATIONS.map((s) => [s.id, [s.lat, s.lon] as LatLon]));
 
 const patternTracks = new WeakMap<Pattern, Track>();
-function patternTrack(p: Pattern): Track {
+export function patternTrack(p: Pattern): Track {
   let t = patternTracks.get(p);
   if (!t) { t = new Track(p.points); patternTracks.set(p, t); }
   return t;
@@ -155,19 +167,63 @@ export function positionNow(
     : trainNow(v, fix, Math.min(sinceFix, MAX_TRAIN_COAST_MS));
 }
 
+/** pdist is in the pattern's own feet; this scales it to our measure of the
+ *  pattern's geometry. */
+export function pdistScale(p: Pattern): number {
+  const track = patternTrack(p);
+  return p.lengthFt > 0 ? track.length / p.lengthFt : 1;
+}
+
+/** A bus's distance along its pattern now (pattern feet): the reported
+ *  pdist advanced the same way `positionNow` moves the marker, so counts
+ *  like "stops to go" agree with what's drawn. */
+export function busPdistNow(
+  v: Vehicle, now: number, patternsByPid: Map<string, Pattern>, impliedFtPerS?: number,
+): number | null {
+  const p = v.pid ? patternsByPid.get(v.pid) : undefined;
+  if (!p || !Number.isFinite(v.pdist)) return null;
+  const dtMs = Number.isFinite(v.fixMs) ? Math.min(Math.max(0, now - v.fixMs), MAX_BUS_COAST_MS) : 0;
+  const speed = Math.min(MAX_FT_PER_S, impliedFtPerS ?? v.observedFtPerS ?? 0);
+  const length = p.lengthFt > 0 ? p.lengthFt : patternTrack(p).length;
+  return Math.min(length, v.pdist! + (speed > 0 ? speed * (dtMs / 1000) : 0));
+}
+
 function busNow(
   v: Vehicle, fix: LatLon, dtMs: number, patternsByPid: Map<string, Pattern>, impliedFtPerS?: number,
 ): LatLon {
   const p = v.pid ? patternsByPid.get(v.pid) : undefined;
-  if (!p || !Number.isFinite(v.pdist) || p.points.length < 2) return fix;
-  const speed = Math.min(MAX_FT_PER_S, impliedFtPerS ?? v.observedFtPerS ?? 0);
-  if (!(speed > 0) || dtMs <= 0) return fix;
+  if (!p || !Number.isFinite(v.pdist) || p.points.length < 2 || dtMs <= 0) return fix;
+  const pdist = busPdistNow(v, v.fixMs + dtMs, patternsByPid, impliedFtPerS);
+  if (pdist === null || pdist === v.pdist) return fix;
   const track = patternTrack(p);
-  // pdist is in the pattern's own feet; scale to our measure of its geometry.
-  const k = p.lengthFt > 0 ? track.length / p.lengthFt : 1;
-  const s0 = v.pdist! * k;
-  const s1 = Math.min(track.length, s0 + speed * k * (dtMs / 1000));
-  return shifted(fix, track.at(s0), track.at(s1));
+  const k = pdistScale(p);
+  return shifted(fix, track.at(v.pdist! * k), track.at(pdist * k));
+}
+
+/** Stops still ahead of a bus before it reaches the center stop, counting
+ *  the center stop itself: 1 means Division is the next stop. Null once it's
+ *  past, or when the pattern has no center stop. */
+export function stopsToCenter(p: Pattern, pdist: number): number | null {
+  const c = p.centerStop;
+  if (!c || !(pdist <= c.pdist)) return null;
+  return p.stops.filter((s) => s.pdist > pdist && s.pdist <= c.pdist).length || 1;
+}
+
+/** The stretch of a pattern covering its last `n` stops before the center
+ *  stop, with those stops, for drawing the approach zone. */
+export function approachZone(p: Pattern, n: number): { path: LatLon[]; stops: LatLon[] } | null {
+  const c = p.centerStop;
+  if (!c || p.points.length < 2 || n < 1) return null;
+  const before = p.stops.filter((s) => s.pdist < c.pdist).sort((a, b) => b.pdist - a.pdist);
+  if (!before.length) return null;
+  // Start a little before the nth stop, so a bus waiting there is inside.
+  const first = before[Math.min(n, before.length) - 1];
+  const k = pdistScale(p);
+  const startFt = Math.max(0, first.pdist - 150) * k;
+  return {
+    path: patternTrack(p).slice(startFt, c.pdist * k),
+    stops: before.slice(0, n).map((s) => [s.lat, s.lon] as LatLon),
+  };
 }
 
 /** The fix and the station must both sit on the track for along-track
