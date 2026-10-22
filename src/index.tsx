@@ -11,6 +11,8 @@ import {
 import type { Arrival, ArrivalData, FetchJson, LiveRequest, Pattern, PositionData, Vehicle } from './cta';
 import { approachZone, busPdistNow, positionNow, stopsToCenter, withObservedSpeed } from './motion';
 import { useFitFontSize } from './fit';
+import { chicagoNow, inWindow, parseClock } from './schedule';
+import type { Days } from './schedule';
 
 const PLUGIN_ID = 'cta-tracker';
 
@@ -72,6 +74,14 @@ interface Config {
   mapHeightPct: number;
   /** Board rows: direction words, arrows only, or whichever lets the times be larger. */
   directionLabels: 'auto' | 'words' | 'arrows';
+  /** Routes (bus numbers, or Blue) left off the map and board between
+   *  hideStart and hideEnd on hideDays, Chicago time. */
+  hideRoutes: string[];
+  hideStart: number | null;
+  hideEnd: number | null;
+  hideDays: Days;
+  /** Fine dark outline on all text, for bright backgrounds. */
+  textOutline: boolean;
   /** A bus this many stops or fewer from the center is emphasized; 0 = off. */
   nearStops: number;
   /** Routes whose approach zone (the last `nearStops` stops) is drawn. */
@@ -110,6 +120,11 @@ function readConfig(raw: Record<string, unknown>): Config {
     mapWidthPct: n(raw.mapWidthPct, 60, 25, 80),
     mapHeightPct: n(raw.mapHeightPct, 45, 25, 80),
     directionLabels: pick(raw.directionLabels, ['auto', 'words', 'arrows'], 'auto'),
+    hideRoutes: parseRoutes(typeof raw.hideRoutes === 'string' ? raw.hideRoutes : ''),
+    hideStart: parseClock(raw.hideStart),
+    hideEnd: parseClock(raw.hideEnd),
+    hideDays: pick(raw.hideDays, ['weekdays', 'weekends', 'everyday'], 'weekdays'),
+    textOutline: on(raw.textOutline),
     nearStops: Math.round(n(raw.nearStops, 4, 0, 10)),
     highlightRoutes: parseRoutes(typeof raw.highlightRoutes === 'string' ? raw.highlightRoutes : '56'),
     iconStyle: pick(raw.iconStyle, ['badge', 'car', 'tile'], 'car'),
@@ -346,8 +361,11 @@ function routeColor(routes: string[], route: string): string {
   return BUS_COLORS[(i < 0 ? 0 : i) % BUS_COLORS.length];
 }
 
+/** `palette` is the full configured route list: colors follow a route's
+ *  place in it, so hiding one route doesn't recolor the others. */
 function buildRows(
-  routes: string[], station: string, patterns: Pattern[], live: ArrivalData | null, now: number, perDir: number,
+  routes: string[], palette: string[], station: string, patterns: Pattern[], live: ArrivalData | null,
+  now: number, perDir: number,
 ): Row[] {
   const byRow = new Map<string, Arrival[]>();
   for (const a of live?.arrivals ?? []) {
@@ -375,7 +393,7 @@ function buildRows(
     for (const dir of sorted) {
       const key = busRowKey(rt, dir);
       rows.push({
-        key, kind: 'bus', badge: rt, color: routeColor(routes, rt),
+        key, kind: 'bus', badge: rt, color: routeColor(palette, rt),
         label: dir.replace(/bound$/, ''), arrow: DIR_ARROW[dir] ?? '', arrivals: take(key),
       });
     }
@@ -770,7 +788,7 @@ function TransitMap(props: MapProps) {
       {/* Scale bar */}
       <g transform={`translate(${w - scalePx - fontPx * 0.6} ${h - fontPx * 0.7})`} opacity={0.6}>
         <path d={`M0 -4 V0 H${scalePx} V-4`} fill="none" stroke="currentColor" strokeWidth={1.5} />
-        <text x={scalePx} y={-fontPx * 0.45} fontSize={small * 0.9} textAnchor="end" fill="currentColor">
+        <text x={scalePx} y={-fontPx * 0.45} fontSize={small * 0.9} textAnchor="end" fill="currentColor" style={haloStyle}>
           {scaleMiles === 1 ? '1 mi' : '½ mi'}
         </text>
       </g>
@@ -869,6 +887,12 @@ function Badge(props: { kind: 'train' | 'bus'; r: number; heading: number; color
   );
 }
 
+/** A fine dark outline around light text: a one-pixel ring in four
+ *  directions plus a soft edge, so it reads over a bright photo without
+ *  looking bold. */
+const TEXT_OUTLINE = '1px 0 0 rgba(0,0,0,0.7), -1px 0 0 rgba(0,0,0,0.7), 0 1px 0 rgba(0,0,0,0.7), '
+  + '0 -1px 0 rgba(0,0,0,0.7), 0 0 3px rgba(0,0,0,0.55)';
+
 const haloStyle: CSSProperties = {
   paintOrder: 'stroke',
   stroke: 'rgba(0,0,0,0.85)',
@@ -958,7 +982,11 @@ function ArrivalChip(props: {
       padding: '0.15em 0.4em',
       borderRadius: '0.4em',
       border: `${near ? '0.18em' : '0.1em'} ${ghost ? 'dashed' : 'solid'} ${ghost ? 'rgba(255,255,255,0.45)' : props.color}`,
-      background: ghost ? 'transparent' : near ? `${props.color}40` : 'rgba(255,255,255,0.08)',
+      // A dark tint behind every chip, so white numbers keep their contrast
+      // when a bright photo shows through the module.
+      background: ghost
+        ? 'rgba(0,0,0,0.2)'
+        : near ? `linear-gradient(${props.color}40, ${props.color}40), rgba(0,0,0,0.3)` : 'rgba(0,0,0,0.3)',
       opacity: ghost ? 0.75 : 1,
       textAlign: 'center',
       lineHeight: 1.1,
@@ -991,7 +1019,7 @@ function Board(props: {
         {rows.map((r) => (
           <div key={r.key} style={{ display: 'flex', alignItems: 'center', gap: '0.5em' }}>
             <div style={{
-              background: r.color, color: '#000', fontWeight: 800, borderRadius: '0.35em',
+              background: r.color, color: '#000', fontWeight: 800, borderRadius: '0.35em', textShadow: 'none',
               minWidth: '2.6em', textAlign: 'center', padding: '0.15em 0.3em', fontSize: '0.9em',
             }}>{r.badge}</div>
             {props.compact
@@ -1080,11 +1108,37 @@ export default function CtaTracker(props: PluginComponentProps) {
     ? (rootSize.w >= rootSize.h * 1.15 ? 'side' : 'stacked')
     : cfg.layout;
 
-  const patternList = patterns?.patterns ?? [];
-  const rows = buildRows(routes, cfg.trainStation, patternList, data, now, cfg.arrivalsPerDirection);
+  const allPatterns = patterns?.patterns ?? [];
+
+  // Scheduled hiding (the 70 during the morning commute, say). Data for a
+  // hidden route keeps flowing, so it's back with live positions the moment
+  // the window ends; it's only left out of what's drawn.
+  const hideActive = cfg.hideRoutes.length > 0
+    && inWindow(chicagoNow(now), cfg.hideStart, cfg.hideEnd, cfg.hideDays);
+  const hiddenKey = hideActive ? cfg.hideRoutes.join(',') : '';
+  const hidden = useMemo(() => new Set(hiddenKey ? hiddenKey.split(',') : []), [hiddenKey]);
+  const trainHidden = hidden.has('BLUE') || hidden.has('TRAIN');
+  const shownRoutes = useMemo(() => routes.filter((r) => !hidden.has(r)), [routes, hidden]);
+  const patternList = useMemo(
+    () => (hidden.size ? allPatterns.filter((p) => !hidden.has(p.route.toUpperCase())) : allPatterns),
+    [allPatterns, hidden],
+  );
+  const shownVehicles = useMemo(() => (hidden.size
+    ? vehicles.filter((v) => (v.kind === 'train' ? !trainHidden : !hidden.has(v.route.toUpperCase())))
+    : vehicles), [vehicles, hidden, trainHidden]);
+  const shownData = useMemo(() => (data && hidden.size
+    ? {
+      ...data,
+      arrivals: data.arrivals.filter((a) => (a.kind === 'train' ? !trainHidden : !hidden.has(a.route.toUpperCase()))),
+    }
+    : data), [data, hidden, trainHidden]);
+
+  const rows = buildRows(
+    shownRoutes, routes, trainHidden ? '' : cfg.trainStation, patternList, shownData, now, cfg.arrivalsPerDirection,
+  );
   const busStops = useMemo(
-    () => stopsByBus(vehicles, patternList, data?.arrivals ?? [], now),
-    [vehicles, patternList, data, now],
+    () => stopsByBus(shownVehicles, patternList, shownData?.arrivals ?? [], now),
+    [shownVehicles, patternList, shownData, now],
   );
   const vehicleIds = useMemo(() => new Set(vehicles.map((v) => `${v.kind}:${v.id}`)), [vehicles]);
 
@@ -1158,7 +1212,7 @@ export default function CtaTracker(props: PluginComponentProps) {
           w={mapSize.w} h={mapSize.h} fontPx={fontPx}
           center={center} centerLabel={cfg.centerLabel} north={cfg.milesNorth} south={cfg.milesSouth}
           routes={routes} patterns={patternList}
-          vehicles={vehicles} arrivals={data?.arrivals ?? []} now={now}
+          vehicles={shownVehicles} arrivals={shownData?.arrivals ?? []} now={now}
           showPassed={cfg.showPassed} showStreets={cfg.showStreets} timeFormat={cfg.timeFormat}
           nearStops={cfg.nearStops} highlightRoutes={cfg.highlightRoutes} busStops={busStops}
           iconStyle={cfg.iconStyle}
@@ -1175,6 +1229,9 @@ export default function CtaTracker(props: PluginComponentProps) {
       ref={rootRef}
       style={{
         ...hostFrameStyle({ ...props.style, fontSize: fontPx }),
+        // Inherited by every line of HTML text in the module; map text is SVG
+        // and carries its own stroked halo.
+        textShadow: cfg.textOutline ? TEXT_OUTLINE : undefined,
         display: 'flex',
         flexDirection: layout === 'side' ? 'row' : 'column',
         gap: '0.75em',

@@ -1,7 +1,7 @@
 {
   "id": "cta-tracker",
   "name": "CTA Tracker",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Live map of CTA trains and buses around one stop, with the next arrivals in each direction.",
   "author": "Ryan",
   "license": "MIT",
@@ -29,6 +29,11 @@
     "mapWidthPct": 60,
     "mapHeightPct": 45,
     "directionLabels": "auto",
+    "hideRoutes": "",
+    "hideStart": "6:00",
+    "hideEnd": "10:00",
+    "hideDays": "weekdays",
+    "textOutline": true,
     "nearStops": 4,
     "highlightRoutes": "56",
     "iconStyle": "car"
@@ -129,6 +134,42 @@
         "enum": ["auto", "words", "arrows"],
         "enumLabels": ["Auto (arrows when words would shrink the times)", "Words (↑ North, ↖ O'Hare)", "Arrows only"],
         "ui:widget": "select",
+        "ui:group": "Layout"
+      },
+      "hideRoutes": {
+        "type": "string",
+        "title": "Hide these routes on a schedule",
+        "description": "Comma-separated bus routes, or Blue for the train, e.g. 70. Hidden from the map and arrivals between the times below. Leave empty for no schedule.",
+        "ui:widget": "text",
+        "ui:group": "Schedule"
+      },
+      "hideStart": {
+        "type": "string",
+        "title": "Hide from",
+        "description": "Chicago time, e.g. 6:00 or 6:00 AM.",
+        "ui:widget": "text",
+        "ui:group": "Schedule"
+      },
+      "hideEnd": {
+        "type": "string",
+        "title": "Hide until",
+        "description": "e.g. 10:00. A time earlier than Hide from runs past midnight.",
+        "ui:widget": "text",
+        "ui:group": "Schedule"
+      },
+      "hideDays": {
+        "type": "string",
+        "title": "On",
+        "enum": ["weekdays", "weekends", "everyday"],
+        "enumLabels": ["Weekdays", "Weekends", "Every day"],
+        "ui:widget": "select",
+        "ui:group": "Schedule"
+      },
+      "textOutline": {
+        "type": "boolean",
+        "title": "Outline text",
+        "description": "A fine dark outline around light text, so it reads over bright backgrounds.",
+        "ui:widget": "toggle",
         "ui:group": "Layout"
       },
       "scaleWithSize": {
