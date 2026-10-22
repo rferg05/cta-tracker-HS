@@ -1,6 +1,6 @@
 {
   "name": "cta-tracker",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Home Screens plugin: live CTA train and bus map with arrivals",
   "license": "MIT",
   "scripts": {

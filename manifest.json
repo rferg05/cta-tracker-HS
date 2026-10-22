@@ -1,7 +1,7 @@
 {
   "id": "cta-tracker",
   "name": "CTA Tracker",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Live map of CTA trains and buses around one stop, with the next arrivals in each direction.",
   "author": "Ryan",
   "license": "MIT",
@@ -22,9 +22,10 @@
     "centerLabel": "Division",
     "arrivalsPerDirection": 3,
     "timeFormat": "minutes",
-    "showPassed": true,
+    "showPassed": false,
     "showStreets": true,
     "showLegend": true,
+    "scaleWithSize": true,
     "nearStops": 4,
     "highlightRoutes": "56",
     "iconStyle": "car"
@@ -96,6 +97,13 @@
       "showStreets": {
         "type": "boolean",
         "title": "Show major streets",
+        "ui:widget": "toggle",
+        "ui:group": "Layout"
+      },
+      "scaleWithSize": {
+        "type": "boolean",
+        "title": "Scale with module size",
+        "description": "Grow text, icons and lines with the module, so a large module stays readable from across the room. Text size still applies on top. Off sizes everything from Text size alone.",
         "ui:widget": "toggle",
         "ui:group": "Layout"
       },

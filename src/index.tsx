@@ -33,6 +33,14 @@ const DIR_ARROW: Record<string, string> = {
  *  counts as in view, so lines and vehicles run off the edge cleanly. */
 const VIEW_MARGIN = 1.15;
 
+/** The arrivals board's text may grow to this multiple of the map's text
+ *  size when its box has room; it shrinks below that to fit. */
+const BOARD_MAX_SCALE = 1.8;
+/** Map time tags, against the map's text size: the most-read text on the map. */
+const TAG_SCALE = 0.95;
+/** In the stacked layout, the share of the height the board gets. */
+const STACKED_BOARD_SHARE = 55;
+
 /** Drawn positions advance once a second; CSS glides each marker between
  *  them, so motion is continuous for one render per second. */
 const MOTION_TICK_MS = 1000;
@@ -59,6 +67,8 @@ interface Config {
   showStreets: boolean;
   /** The update time and solid/dashed/bright key under the board. */
   showLegend: boolean;
+  /** Grow everything with the module's size (on top of Text size). */
+  scaleWithSize: boolean;
   /** A bus this many stops or fewer from the center is emphasized; 0 = off. */
   nearStops: number;
   /** Routes whose approach zone (the last `nearStops` stops) is drawn. */
@@ -93,6 +103,7 @@ function readConfig(raw: Record<string, unknown>): Config {
     showPassed: on(raw.showPassed),
     showStreets: on(raw.showStreets),
     showLegend: on(raw.showLegend),
+    scaleWithSize: on(raw.scaleWithSize),
     nearStops: Math.round(n(raw.nearStops, 4, 0, 10)),
     highlightRoutes: parseRoutes(typeof raw.highlightRoutes === 'string' ? raw.highlightRoutes : '56'),
     iconStyle: pick(raw.iconStyle, ['badge', 'car', 'tile'], 'car'),
@@ -584,7 +595,7 @@ function TransitMap(props: MapProps) {
       const lon = GRID_ORIGIN[1] - addr / 800 / milesPerLon;
       const x = proj.x([center[0], lon]);
       if (x < 0 || x > w) continue;
-      out.push({ key: `ns${name}`, x1: x, y1: 0, x2: x, y2: h, name, lx: x + fontPx * 0.3, ly: fontPx * 0.95, vertical: true });
+      out.push({ key: `ns${name}`, x1: x, y1: 0, x2: x, y2: h, name, lx: x + fontPx * 0.3, ly: fontPx * 0.85, vertical: true });
     }
     for (const [name, addr] of EW_STREETS) {
       const lat = GRID_ORIGIN[0] + addr / 800 / 69.05;
@@ -629,9 +640,11 @@ function TransitMap(props: MapProps) {
   };
   visible.sort((a, b) => layer(a.v) - layer(b.v));
 
-  const busR = fontPx * 0.62;
-  const trainR = fontPx * 0.8;
-  const small = fontPx * 0.72;
+  // Sized for reading across a room: time tags and vehicles are what the
+  // eye looks for, streets and stations are context.
+  const busR = fontPx * 0.7;
+  const trainR = fontPx * 0.85;
+  const small = fontPx * 0.82;
 
   const placed: Placed[] = visible.map(({ v, at }) => {
     const color = v.kind === 'train' ? BLUE : routeColor(routes, v.route);
@@ -658,11 +671,11 @@ function TransitMap(props: MapProps) {
   // The Blue Line runs right over Milwaukee, so a train and a 56 bus at
   // Division land on the same spot; push overlapping markers apart.
   separate(placed);
-  const labelW = (props.centerLabel.length * 0.62 + 0.3) * fontPx * 0.85;
-  placeTags(placed, small, [
+  const labelW = (props.centerLabel.length * 0.62 + 0.3) * fontPx;
+  placeTags(placed, fontPx * TAG_SCALE, [
     // The center stop and its label
     { x0: proj.cx - fontPx * 0.5, y0: proj.cy - fontPx * 0.5, x1: proj.cx + fontPx * 0.5, y1: proj.cy + fontPx * 0.5 },
-    { x0: proj.cx + fontPx * 0.9, y0: proj.cy - fontPx * 1.7, x1: proj.cx + fontPx * 0.9 + labelW, y1: proj.cy - fontPx * 0.6 },
+    { x0: proj.cx + fontPx * 0.9, y0: proj.cy - fontPx * 1.9, x1: proj.cx + fontPx * 0.9 + labelW, y1: proj.cy - fontPx * 0.55 },
   ], { x0: 0, y0: 0, x1: w, y1: h });
 
   const { cx, cy } = proj;
@@ -674,13 +687,13 @@ function TransitMap(props: MapProps) {
       {streets.map((s) => (
         <g key={s.key}>
           <line x1={s.x1} y1={s.y1} x2={s.x2} y2={s.y2} stroke="currentColor" strokeOpacity={0.12} strokeWidth={1} />
-          <text x={s.lx} y={s.ly} fontSize={small * 0.9} fill="currentColor" fillOpacity={0.4}>{s.name}</text>
+          <text x={s.lx} y={s.ly} fontSize={fontPx * 0.66} fill="currentColor" fillOpacity={0.55}>{s.name}</text>
         </g>
       ))}
 
       {routePaths.map((r) => (
         <path key={r.key} d={r.d} fill="none" stroke={r.color} strokeOpacity={0.55}
-          strokeWidth={fontPx * 0.22} strokeLinecap="round" strokeLinejoin="round" />
+          strokeWidth={fontPx * 0.26} strokeLinecap="round" strokeLinejoin="round" />
       ))}
       {bluePaths.map((d, i) => (
         <path key={i} d={d} fill="none" stroke={BLUE} strokeOpacity={0.8}
@@ -719,7 +732,7 @@ function TransitMap(props: MapProps) {
       {props.centerLabel && (
         // Up and right of the stop: at Division that corner is clear of
         // Milwaukee (NW-SE), Division (E-W) and Ashland (N-S).
-        <text x={cx + fontPx * 0.9} y={cy - fontPx * 0.9} fontSize={fontPx * 0.85} fontWeight={700}
+        <text x={cx + fontPx * 0.9} y={cy - fontPx * 0.9} fontSize={fontPx} fontWeight={800}
           textAnchor="start" fill="currentColor" style={haloStyle}>{props.centerLabel}</text>
       )}
 
@@ -883,7 +896,7 @@ function placeTags(items: Placed[], small: number, keepClear: Box[], view: Box):
   for (const i of order) {
     const it = items[i];
     if (!it.label) continue;
-    const fs = it.near ? small * 1.1 : small;
+    const fs = it.near ? small * 1.15 : small;
     const w = it.label.length * fs * 0.62 + fs * 0.6;
     const h = fs * 1.35;
     const gap = it.hit + fs * 0.15;
@@ -903,8 +916,12 @@ function placeTags(items: Placed[], small: number, keepClear: Box[], view: Box):
       score += (viewArea(box) - overlapArea(box, view)) * 3; // cut off by the map edge
       if (score < bestScore - 0.5) { best = [dx, dy]; bestScore = score; }
     }
-    it.tag = { dx: best[0], dy: best[1], w, h, fs };
-    taken.push({ x0: it.x + best[0], y0: it.y + best[1], x1: it.x + best[0] + w, y1: it.y + best[1] + h });
+    // No side had room (a vehicle at the map edge): slide the tag back inside
+    // rather than let the edge cut it off.
+    const left = Math.min(Math.max(it.x + best[0], view.x0 + 2), view.x1 - w - 2);
+    const top = Math.min(Math.max(it.y + best[1], view.y0 + 2), view.y1 - h - 2);
+    it.tag = { dx: left - it.x, dy: top - it.y, w, h, fs };
+    taken.push({ x0: left, y0: top, x1: left + w, y1: top + h });
   }
 }
 
@@ -947,6 +964,9 @@ function Board(props: {
   busStops: Map<string, number>; nearStops: number;
   /** Spread the rows down the full height instead of stacking them at the top. */
   spread?: boolean;
+  /** Arrow only, no direction word: frees a third of each row for the
+   *  times in a narrow column. */
+  compact?: boolean;
   footer: React.ReactNode;
 }) {
   const { rows, now } = props;
@@ -962,9 +982,13 @@ function Board(props: {
               background: r.color, color: '#000', fontWeight: 800, borderRadius: '0.35em',
               minWidth: '2.6em', textAlign: 'center', padding: '0.15em 0.3em', fontSize: '0.9em',
             }}>{r.badge}</div>
-            <div style={{ width: '5.6em', flexShrink: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '0.9em' }}>
-              <span style={{ opacity: 0.7 }}>{r.arrow}</span> {r.label}
-            </div>
+            {props.compact
+              ? <div style={{ width: '1.1em', flexShrink: 0, textAlign: 'center', fontWeight: 800 }}>{r.arrow}</div>
+              : (
+                <div style={{ width: '5.6em', flexShrink: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '0.9em' }}>
+                  <span style={{ opacity: 0.7 }}>{r.arrow}</span> {r.label}
+                </div>
+              )}
             <div style={{ display: 'flex', gap: '0.3em', flex: 1, minWidth: 0 }}>
               {r.arrivals.length
                 ? r.arrivals.map((a, i) => (
@@ -1031,7 +1055,15 @@ export default function CtaTracker(props: PluginComponentProps) {
   const [rootRef, rootSize] = useSize<HTMLDivElement>();
   const [mapRef, mapSize] = useSize<HTMLDivElement>();
 
-  const fontPx = Number.isFinite(props.style?.fontSize) && props.style.fontSize > 0 ? props.style.fontSize : 16;
+  const textSize = Number.isFinite(props.style?.fontSize) && props.style.fontSize > 0 ? props.style.fontSize : 16;
+  // Everything is sized in multiples of fontPx. Scaling it with the module's
+  // area (against the 960x540 default) keeps a module that fills half a
+  // 1080p wall display readable from across the room without touching the
+  // Text size slider, which still multiplies on top.
+  const sizeScale = cfg.scaleWithSize && rootSize.w > 0 && rootSize.h > 0
+    ? Math.min(3, Math.max(0.75, Math.sqrt((rootSize.w * rootSize.h) / (960 * 540))))
+    : 1;
+  const fontPx = textSize * sizeScale;
   const layout = cfg.layout === 'auto'
     ? (rootSize.w >= rootSize.h * 1.15 ? 'side' : 'stacked')
     : cfg.layout;
@@ -1079,12 +1111,21 @@ export default function CtaTracker(props: PluginComponentProps) {
     </div>
   ) : null;
 
-  // Beside the map the board has a column of fixed height. Fit its text to
-  // that column: it only ever shrinks to stop an overflow, except with the
-  // legend off, where it may also grow (up to a third) into the freed space.
+  // The arrival times are what has to read from across the room, so the
+  // board gets a fixed box (a column beside the map, or the lower part of a
+  // stacked module) and its text grows to the largest size that fits, up to
+  // BOARD_MAX_SCALE times the map's.
+  // A full row (badge, direction word, three times) needs about 21 em; in a
+  // stacked column too narrow to give that room at a readable size, drop the
+  // word and keep the arrow.
+  const compactBoard = layout === 'stacked' && rootSize.w > 0 && rootSize.w < fontPx * 34;
   const boardFit = useFitFontSize(
-    fontPx * (layout === 'side' && !cfg.showLegend ? 1.35 : 1),
-    `${layout}|${rows.map((r) => `${r.key}:${r.arrivals.length}`).join(',')}|${footer ? errors.length : 'none'}`,
+    fontPx * BOARD_MAX_SCALE,
+    `${layout}|${compactBoard}|${rows.map((r) => `${r.key}:${r.arrivals.length}`).join(",")}|${footer ? errors.length : "none"}`,
+  );
+  const board = (
+    <Board rows={rows} now={now} fmt={cfg.timeFormat} vehicleIds={vehicleIds}
+      busStops={busStops} nearStops={cfg.nearStops} footer={footer} spread compact={compactBoard} />
   );
 
   const map = (
@@ -1110,7 +1151,7 @@ export default function CtaTracker(props: PluginComponentProps) {
     <div
       ref={rootRef}
       style={{
-        ...hostFrameStyle(props.style),
+        ...hostFrameStyle({ ...props.style, fontSize: fontPx }),
         display: 'flex',
         flexDirection: layout === 'side' ? 'row' : 'column',
         gap: '0.75em',
@@ -1118,20 +1159,16 @@ export default function CtaTracker(props: PluginComponentProps) {
     >
       {map}
       {layout !== 'map' && (
-        layout === 'side' ? (
-          <div ref={boardFit.boxRef} style={{
-            flex: '1 1 0', minWidth: '17em', minHeight: 0, height: '100%', overflow: 'hidden',
-            fontSize: boardFit.fontSize,
-          }}>
-            <Board rows={rows} now={now} fmt={cfg.timeFormat} vehicleIds={vehicleIds}
-              busStops={busStops} nearStops={cfg.nearStops} footer={footer} spread={!cfg.showLegend} />
-          </div>
-        ) : (
-          <div style={{ flex: '0 0 auto', minHeight: 0 }}>
-            <Board rows={rows} now={now} fmt={cfg.timeFormat} vehicleIds={vehicleIds}
-              busStops={busStops} nearStops={cfg.nearStops} footer={footer} />
-          </div>
-        )
+        <div ref={boardFit.boxRef} style={{
+          ...(layout === 'side'
+            // Pixels, not em: em here would follow the board's own (larger)
+            // text and squeeze the map.
+            ? { flex: '1 1 0', minWidth: fontPx * 17, height: '100%' }
+            : { flex: `0 0 ${STACKED_BOARD_SHARE}%`, width: '100%' }),
+          minHeight: 0, overflow: 'hidden', fontSize: boardFit.fontSize,
+        }}>
+          {board}
+        </div>
       )}
     </div>
   );

@@ -9,13 +9,26 @@ Out of the box it's centered on Division (Blue Line) at Milwaukee/Division/Ashla
 - **Map**: north is up. Trains are long Blue Line rail cars lying along the track, with a chevron toward the front. Buses are round badges in their route's color, with a bus pictogram and a pointed nose aimed the way they're going. Vehicles are drawn slightly to the right of their street, so buses going opposite ways don't overlap. Where two would still overlap (a train over Milwaukee and a 56 at Division, say), they're pushed apart so both show; a vehicle that already passed gives way to one still coming. Time tags pick whichever side of their vehicle is clear. The *Vehicle icons* setting also offers round badges for both, or square trains with round buses. The Blue Line is drawn only as far as Monroe: the Forest Park branch past it is too far out to matter for Division.
 - **Almost there**: a bus within 4 stops of Division is drawn larger with a halo, and its tag and board chip show the stops left ("2 stops", "next stop"). For the 56, those last 4 stops are also drawn as a bright stretch of route with stop dots, in both directions, so a bus inside it stands out.
 - **Bright with a time tag**: headed toward the center stop, with its predicted arrival there.
-- **Faded**: already past the center stop. Turn off *Show vehicles that already passed* to hide these.
+- **Faded**: already past the center stop. Hidden by default; turn on *Show vehicles that already passed* to see them.
 - **Arrivals board**: the next 3 arrivals per route and direction.
   - **Solid chip**: CTA is tracking a real vehicle for that arrival.
   - **Dashed chip with `~`**: Train Tracker is quoting the timetable and no train has been seen yet. These are the arrivals that may not show up.
   - **Amber time**: CTA flags the vehicle as delayed.
 
 To judge whether something will arrive on time, compare a chip's time with the tagged vehicle on the map: how far out it is, and whether it's moving.
+
+## Sizing for a wall display
+
+On a 32" 1080p screen read from about 5 feet, text needs to be roughly 30 px or larger. The module scales itself with its size, so how big it is decides how readable it is. Arrival times measured at default Text size:
+
+| Module size (1080p) | Layout | Arrival times | Map time tags |
+|---|---|---|---|
+| Full screen, 1872×1030 | Side by side | 36 px | 29–34 px |
+| Full width, 1872×850 | Side by side | 36 px | 27–31 px |
+| Half screen, 940×1030 | Stacked | 29 px | 21–24 px |
+| Narrow column, 540×1030 | Stacked (compact) | 27 px | 16–18 px |
+
+For reading across the room, give it at least half the screen, ideally a wide area so it lays out side by side. Turning the legend off helps a little more. In a narrow stacked column, the board drops the direction words and keeps the arrows (↖ toward O'Hare, ↘ toward Forest Park, ↑↓→← for buses) to leave room for larger times.
 
 ## How the markers move
 
@@ -48,6 +61,8 @@ Drawn positions update once a second and the browser animates between them, so m
 | Center lat / lon / label | Division station | Moving it re-picks the bus stops. Keep it within about 5 miles of Division so the Blue Line track still draws. |
 | Map reaches north / south | 1 mi / 1.25 mi | Armitage to Lake around Division. The map's height fits this span and its width shows whatever fits at that scale. |
 | Vehicle icons | Train as a rail car, buses round | Or round badges for both, or square trains. |
+| Scale with module size | On | Text, icons and lines grow with the module's area (against 960×540), on top of Text size. The arrivals board then grows further, up to 1.8×, to fill its box. |
+| Show legend and update time | On | Off frees the space for the map and board. Errors and an out-of-date warning still show. |
 | Emphasize buses within | 4 stops | 0 turns it off. |
 | Highlight approach stops for routes | `56` | Comma-separated, e.g. `56,70`. |
 | Check vehicle positions every | 10 s | 10–60 s. Markers move smoothly either way. |
