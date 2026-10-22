@@ -38,8 +38,6 @@ const VIEW_MARGIN = 1.15;
 const BOARD_MAX_SCALE = 1.8;
 /** Map time tags, against the map's text size: the most-read text on the map. */
 const TAG_SCALE = 0.95;
-/** In the stacked layout, the share of the height the board gets. */
-const STACKED_BOARD_SHARE = 55;
 
 /** Drawn positions advance once a second; CSS glides each marker between
  *  them, so motion is continuous for one render per second. */
@@ -69,6 +67,11 @@ interface Config {
   showLegend: boolean;
   /** Grow everything with the module's size (on top of Text size). */
   scaleWithSize: boolean;
+  /** Map's share of the module: width beside the board, height above it (%). */
+  mapWidthPct: number;
+  mapHeightPct: number;
+  /** Board rows: direction words, arrows only, or whichever lets the times be larger. */
+  directionLabels: 'auto' | 'words' | 'arrows';
   /** A bus this many stops or fewer from the center is emphasized; 0 = off. */
   nearStops: number;
   /** Routes whose approach zone (the last `nearStops` stops) is drawn. */
@@ -104,6 +107,9 @@ function readConfig(raw: Record<string, unknown>): Config {
     showStreets: on(raw.showStreets),
     showLegend: on(raw.showLegend),
     scaleWithSize: on(raw.scaleWithSize),
+    mapWidthPct: n(raw.mapWidthPct, 60, 25, 80),
+    mapHeightPct: n(raw.mapHeightPct, 45, 25, 80),
+    directionLabels: pick(raw.directionLabels, ['auto', 'words', 'arrows'], 'auto'),
     nearStops: Math.round(n(raw.nearStops, 4, 0, 10)),
     highlightRoutes: parseRoutes(typeof raw.highlightRoutes === 'string' ? raw.highlightRoutes : '56'),
     iconStyle: pick(raw.iconStyle, ['badge', 'car', 'tile'], 'car'),
@@ -686,8 +692,14 @@ function TransitMap(props: MapProps) {
     <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ display: 'block' }}>
       {streets.map((s) => (
         <g key={s.key}>
-          <line x1={s.x1} y1={s.y1} x2={s.x2} y2={s.y2} stroke="currentColor" strokeOpacity={0.12} strokeWidth={1} />
-          <text x={s.lx} y={s.ly} fontSize={fontPx * 0.66} fill="currentColor" fillOpacity={0.55}>{s.name}</text>
+          {/* A dark casing under a light line, so the grid reads over both
+              bright and dark photos behind the module. */}
+          <line x1={s.x1} y1={s.y1} x2={s.x2} y2={s.y2} stroke="#000" strokeOpacity={0.35}
+            strokeWidth={Math.max(3, fontPx * 0.12)} />
+          <line x1={s.x1} y1={s.y1} x2={s.x2} y2={s.y2} stroke="currentColor" strokeOpacity={0.28}
+            strokeWidth={Math.max(1.2, fontPx * 0.05)} />
+          <text x={s.lx} y={s.ly} fontSize={fontPx * 0.66} fill="currentColor" fillOpacity={0.8}
+            style={haloStyle}>{s.name}</text>
         </g>
       ))}
 
@@ -1115,10 +1127,14 @@ export default function CtaTracker(props: PluginComponentProps) {
   // board gets a fixed box (a column beside the map, or the lower part of a
   // stacked module) and its text grows to the largest size that fits, up to
   // BOARD_MAX_SCALE times the map's.
-  // A full row (badge, direction word, three times) needs about 21 em; in a
-  // stacked column too narrow to give that room at a readable size, drop the
-  // word and keep the arrow.
-  const compactBoard = layout === 'stacked' && rootSize.w > 0 && rootSize.w < fontPx * 34;
+  // A full row (badge, direction word, three times) needs about 21 em. Where
+  // the board's width can't give that room at a readable size (a narrow
+  // stacked column, or a thin column beside a wide map), drop the word and
+  // keep the arrow, unless the directionLabels setting says otherwise.
+  const boardWidth = layout === 'side' ? rootSize.w * (1 - cfg.mapWidthPct / 100) : rootSize.w;
+  const compactBoard = layout !== 'map' && boardWidth > 0
+    && (cfg.directionLabels === 'arrows'
+      || (cfg.directionLabels === 'auto' && boardWidth < fontPx * (layout === 'stacked' ? 34 : 21)));
   const boardFit = useFitFontSize(
     fontPx * BOARD_MAX_SCALE,
     `${layout}|${compactBoard}|${rows.map((r) => `${r.key}:${r.arrivals.length}`).join(",")}|${footer ? errors.length : "none"}`,
@@ -1129,7 +1145,14 @@ export default function CtaTracker(props: PluginComponentProps) {
   );
 
   const map = (
-    <div ref={mapRef} style={{ position: 'relative', flex: layout === 'side' ? '1.35 1 0' : '1 1 0', minWidth: 0, minHeight: 0, overflow: 'hidden', borderRadius: '0.5em' }}>
+    <div ref={mapRef} style={{
+      position: 'relative', minWidth: 0, minHeight: 0, overflow: 'hidden', borderRadius: '0.5em',
+      // The map takes its configured share (less half the gap); the board
+      // takes the rest. Map only fills the module.
+      flex: layout === 'map'
+        ? '1 1 0'
+        : `0 0 calc(${layout === 'side' ? cfg.mapWidthPct : cfg.mapHeightPct}% - 0.375em)`,
+    }}>
       {mapSize.w > 0 && mapSize.h > 0 && (
         <TransitMap
           w={mapSize.w} h={mapSize.h} fontPx={fontPx}
@@ -1161,10 +1184,8 @@ export default function CtaTracker(props: PluginComponentProps) {
       {layout !== 'map' && (
         <div ref={boardFit.boxRef} style={{
           ...(layout === 'side'
-            // Pixels, not em: em here would follow the board's own (larger)
-            // text and squeeze the map.
-            ? { flex: '1 1 0', minWidth: fontPx * 17, height: '100%' }
-            : { flex: `0 0 ${STACKED_BOARD_SHARE}%`, width: '100%' }),
+            ? { flex: '1 1 0', minWidth: 0, height: '100%' }
+            : { flex: '1 1 0', width: '100%' }),
           minHeight: 0, overflow: 'hidden', fontSize: boardFit.fontSize,
         }}>
           {board}

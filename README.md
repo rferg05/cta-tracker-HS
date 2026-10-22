@@ -61,6 +61,9 @@ Drawn positions update once a second and the browser animates between them, so m
 | Center lat / lon / label | Division station | Moving it re-picks the bus stops. Keep it within about 5 miles of Division so the Blue Line track still draws. |
 | Map reaches north / south | 1 mi / 1.25 mi | Armitage to Lake around Division. The map's height fits this span and its width shows whatever fits at that scale. |
 | Vehicle icons | Train as a rail car, buses round | Or round badges for both, or square trains. |
+| Map width beside arrivals | 60% | Side-by-side layout. The board takes the rest and fits its text to it. |
+| Map height above arrivals | 45% | Stacked layout. |
+| Direction labels | Auto | Auto shows arrows instead of words when the words would make the times smaller. Or always words, or always arrows. |
 | Scale with module size | On | Text, icons and lines grow with the module's area (against 960×540), on top of Text size. The arrivals board then grows further, up to 1.8×, to fill its box. |
 | Show legend and update time | On | Off frees the space for the map and board. Errors and an out-of-date warning still show. |
 | Emphasize buses within | 4 stops | 0 turns it off. |
@@ -89,7 +92,7 @@ npm run preview      # module against a mock CTA feed at http://localhost:5174
 npm run build        # dist/bundle.js
 ```
 
-The preview accepts query parameters for size and any config key, e.g. `?w=520&h=800&layout=stacked&milesNorth=2`. `fs=24` sets the text size, and `scene=overlap` parks a train and a 56 bus at Division together.
+The preview accepts query parameters for size and any config key, e.g. `?w=520&h=800&layout=stacked&milesNorth=2`. `fs=24` sets the text size, `scene=overlap` parks a train and a 56 bus at Division together, and `bg=busy` puts bright and dark patches behind the module.
 
 Release tarball:
 

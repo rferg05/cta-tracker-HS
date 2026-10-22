@@ -1,7 +1,7 @@
 {
   "id": "cta-tracker",
   "name": "CTA Tracker",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Live map of CTA trains and buses around one stop, with the next arrivals in each direction.",
   "author": "Ryan",
   "license": "MIT",
@@ -26,6 +26,9 @@
     "showStreets": true,
     "showLegend": true,
     "scaleWithSize": true,
+    "mapWidthPct": 60,
+    "mapHeightPct": 45,
+    "directionLabels": "auto",
     "nearStops": 4,
     "highlightRoutes": "56",
     "iconStyle": "car"
@@ -98,6 +101,34 @@
         "type": "boolean",
         "title": "Show major streets",
         "ui:widget": "toggle",
+        "ui:group": "Layout"
+      },
+      "mapWidthPct": {
+        "type": "number",
+        "title": "Map width beside arrivals (%)",
+        "description": "When the map and arrivals sit side by side. The arrivals board takes the rest and fits its text to it.",
+        "minimum": 25,
+        "maximum": 80,
+        "ui:widget": "slider",
+        "ui:step": 5,
+        "ui:group": "Layout"
+      },
+      "mapHeightPct": {
+        "type": "number",
+        "title": "Map height above arrivals (%)",
+        "description": "When the map sits above the arrivals (a tall module).",
+        "minimum": 25,
+        "maximum": 80,
+        "ui:widget": "slider",
+        "ui:step": 5,
+        "ui:group": "Layout"
+      },
+      "directionLabels": {
+        "type": "string",
+        "title": "Direction labels on the arrivals board",
+        "enum": ["auto", "words", "arrows"],
+        "enumLabels": ["Auto (arrows when words would shrink the times)", "Words (↑ North, ↖ O'Hare)", "Arrows only"],
+        "ui:widget": "select",
         "ui:group": "Layout"
       },
       "scaleWithSize": {
