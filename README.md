@@ -65,7 +65,8 @@ Drawn positions update once a second and the browser animates between them, so m
 | Map height above arrivals | 45% | Stacked layout. |
 | Direction labels | Auto | Auto shows arrows instead of words when the words would make the times smaller. Or always words, or always arrows. |
 | Hide these routes on a schedule | (empty) | E.g. `70`, or `Blue` for the train. Hidden from the map and arrivals between *Hide from* and *Hide until* (default 6:00 to 10:00, Chicago time) on the chosen days. Data keeps loading in the background, so routes come back live the moment the window ends. A window ending before it starts runs past midnight. |
-| Outline text | On | Fine dark outline on light text, for bright backgrounds. |
+| Outline text | On | Dark outline on light text, scaled to the text size, for bright backgrounds. |
+| Shade behind arrivals | 30% | A dark panel behind the arrivals board so the times keep their contrast over bright photos. 0 turns it off. |
 | Scale with module size | On | Text, icons and lines grow with the module's area (against 960×540), on top of Text size. The arrivals board then grows further, up to 1.8×, to fill its box. |
 | Show legend and update time | On | Off frees the space for the map and board. Errors and an out-of-date warning still show. |
 | Emphasize buses within | 4 stops | 0 turns it off. |
@@ -94,7 +95,7 @@ npm run preview      # module against a mock CTA feed at http://localhost:5174
 npm run build        # dist/bundle.js
 ```
 
-The preview accepts query parameters for size and any config key, e.g. `?w=520&h=800&layout=stacked&milesNorth=2`. `fs=24` sets the text size, `scene=overlap` parks a train and a 56 bus at Division together, and `bg=busy` puts bright and dark patches behind the module.
+The preview accepts query parameters for size and any config key, e.g. `?w=520&h=800&layout=stacked&milesNorth=2`. `fs=24` sets the text size, `scene=overlap` parks a train and a 56 bus at Division together, and `bg=busy` puts bright and dark patches behind the module (`bg=bright` a vivid light wallpaper), and `modalpha=0.1` makes the module nearly see-through.
 
 Release tarball:
 

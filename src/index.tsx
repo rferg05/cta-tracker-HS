@@ -82,6 +82,8 @@ interface Config {
   hideDays: Days;
   /** Fine dark outline on all text, for bright backgrounds. */
   textOutline: boolean;
+  /** Darkness of the panel behind the arrivals board, 0-80 (%). */
+  boardShade: number;
   /** A bus this many stops or fewer from the center is emphasized; 0 = off. */
   nearStops: number;
   /** Routes whose approach zone (the last `nearStops` stops) is drawn. */
@@ -125,6 +127,7 @@ function readConfig(raw: Record<string, unknown>): Config {
     hideEnd: parseClock(raw.hideEnd),
     hideDays: pick(raw.hideDays, ['weekdays', 'weekends', 'everyday'], 'weekdays'),
     textOutline: on(raw.textOutline),
+    boardShade: n(raw.boardShade, 30, 0, 80),
     nearStops: Math.round(n(raw.nearStops, 4, 0, 10)),
     highlightRoutes: parseRoutes(typeof raw.highlightRoutes === 'string' ? raw.highlightRoutes : '56'),
     iconStyle: pick(raw.iconStyle, ['badge', 'car', 'tile'], 'car'),
@@ -887,11 +890,21 @@ function Badge(props: { kind: 'train' | 'bus'; r: number; heading: number; color
   );
 }
 
-/** A fine dark outline around light text: a one-pixel ring in four
- *  directions plus a soft edge, so it reads over a bright photo without
- *  looking bold. */
-const TEXT_OUTLINE = '1px 0 0 rgba(0,0,0,0.7), -1px 0 0 rgba(0,0,0,0.7), 0 1px 0 rgba(0,0,0,0.7), '
-  + '0 -1px 0 rgba(0,0,0,0.7), 0 0 3px rgba(0,0,0,0.55)';
+/** A dark outline around light text, so it reads over a bright photo.
+ *  In em, so it keeps the same weight at every text size: eight one-step
+ *  offsets make a thin ring, and a soft shadow behind darkens the edge. */
+const TEXT_OUTLINE = [
+  [1, 0], [-1, 0], [0, 1], [0, -1], [0.7, 0.7], [-0.7, 0.7], [0.7, -0.7], [-0.7, -0.7],
+].map(([x, y]) => `${(x * 0.045).toFixed(3)}em ${(y * 0.045).toFixed(3)}em 0 rgba(0,0,0,0.8)`)
+  .concat('0 0 0.15em rgba(0,0,0,0.75)')
+  .join(', ');
+
+/** Light text at reduced strength. Dimming with `opacity` would fade the
+ *  outline too, which is what made dim text vanish on bright photos; a
+ *  faded color keeps the outline at full strength. */
+function dim(alpha: number): string {
+  return `color-mix(in srgb, currentColor ${Math.round(alpha * 100)}%, transparent)`;
+}
 
 const haloStyle: CSSProperties = {
   paintOrder: 'stroke',
@@ -985,16 +998,16 @@ function ArrivalChip(props: {
       // A dark tint behind every chip, so white numbers keep their contrast
       // when a bright photo shows through the module.
       background: ghost
-        ? 'rgba(0,0,0,0.2)'
-        : near ? `linear-gradient(${props.color}40, ${props.color}40), rgba(0,0,0,0.3)` : 'rgba(0,0,0,0.3)',
-      opacity: ghost ? 0.75 : 1,
+        ? 'rgba(0,0,0,0.35)'
+        : near ? `linear-gradient(${props.color}40, ${props.color}40), rgba(0,0,0,0.45)` : 'rgba(0,0,0,0.45)',
+      color: ghost ? dim(0.8) : undefined,
       textAlign: 'center',
       lineHeight: 1.1,
     }}>
       <div style={{ fontWeight: 700, fontSize: '1.05em', color: a.delayed ? '#FBBF24' : undefined }}>
         {ghost && a.scheduled ? '~' : ''}{main}
       </div>
-      {sub && <div style={{ fontSize: '0.7em', opacity: near ? 0.95 : 0.7, fontWeight: near ? 700 : undefined }}>{sub}</div>}
+      {sub && <div style={{ fontSize: '0.7em', color: near ? undefined : dim(0.8), fontWeight: near ? 700 : undefined }}>{sub}</div>}
     </div>
   );
 }
@@ -1026,7 +1039,7 @@ function Board(props: {
               ? <div style={{ width: '1.1em', flexShrink: 0, textAlign: 'center', fontWeight: 800 }}>{r.arrow}</div>
               : (
                 <div style={{ width: '5.6em', flexShrink: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '0.9em' }}>
-                  <span style={{ opacity: 0.7 }}>{r.arrow}</span> {r.label}
+                  <span style={{ color: dim(0.75) }}>{r.arrow}</span> {r.label}
                 </div>
               )}
             <div style={{ display: 'flex', gap: '0.3em', flex: 1, minWidth: 0 }}>
@@ -1036,7 +1049,7 @@ function Board(props: {
                     tracked={props.vehicleIds.has(`${a.kind}:${a.vehicleId}`)}
                     nearStops={a.kind === 'bus' ? nearCount(props.busStops.get(a.vehicleId), props.nearStops) : undefined} />
                 ))
-                : <div style={{ opacity: 0.45, fontSize: '0.85em' }}>No arrivals</div>}
+                : <div style={{ color: dim(0.65), fontSize: '0.85em' }}>No arrivals</div>}
             </div>
           </div>
         ))}
@@ -1158,7 +1171,7 @@ export default function CtaTracker(props: PluginComponentProps) {
   // rest of the module gets the space.
   const showStatus = cfg.showLegend || !data || stale;
   const footer = errors.length > 0 || showStatus ? (
-    <div style={{ fontSize: '0.72em', opacity: 0.75, display: 'flex', flexDirection: 'column', gap: '0.15em' }}>
+    <div style={{ fontSize: '0.72em', color: dim(0.9), display: 'flex', flexDirection: 'column', gap: '0.15em' }}>
       {errors.length > 0 && (
         <div style={{ color: '#FCA5A5', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {errors[0]}{errors.length > 1 ? ` (+${errors.length - 1} more)` : ''}
@@ -1244,6 +1257,14 @@ export default function CtaTracker(props: PluginComponentProps) {
             ? { flex: '1 1 0', minWidth: 0, height: '100%' }
             : { flex: '1 1 0', width: '100%' }),
           minHeight: 0, overflow: 'hidden', fontSize: boardFit.fontSize,
+          // A soft dark panel behind the arrivals, so the times keep their
+          // contrast however bright the photo behind the module gets.
+          ...(cfg.boardShade > 0 ? {
+            background: `rgba(0,0,0,${cfg.boardShade / 100})`,
+            borderRadius: '0.5em',
+            padding: '0.4em 0.5em',
+            boxSizing: 'border-box' as const,
+          } : {}),
         }}>
           {board}
         </div>

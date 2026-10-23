@@ -1,7 +1,7 @@
 {
   "id": "cta-tracker",
   "name": "CTA Tracker",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Live map of CTA trains and buses around one stop, with the next arrivals in each direction.",
   "author": "Ryan",
   "license": "MIT",
@@ -34,6 +34,7 @@
     "hideEnd": "10:00",
     "hideDays": "weekdays",
     "textOutline": true,
+    "boardShade": 30,
     "nearStops": 4,
     "highlightRoutes": "56",
     "iconStyle": "car"
@@ -170,6 +171,16 @@
         "title": "Outline text",
         "description": "A fine dark outline around light text, so it reads over bright backgrounds.",
         "ui:widget": "toggle",
+        "ui:group": "Layout"
+      },
+      "boardShade": {
+        "type": "number",
+        "title": "Shade behind arrivals (%)",
+        "description": "A dark panel behind the arrivals board, so the times stay readable over bright backgrounds. 0 turns it off.",
+        "minimum": 0,
+        "maximum": 80,
+        "ui:widget": "slider",
+        "ui:step": 5,
         "ui:group": "Layout"
       },
       "scaleWithSize": {
